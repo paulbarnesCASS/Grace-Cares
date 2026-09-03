@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, Package, ShoppingCart, ShieldCheck, HandHeart, Calendar,
   RefreshCw, Users, MessageSquare, FileText, LogOut, Plus, Leaf, AlertTriangle, Download,
+  Link2, ClipboardList, CheckCircle2,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -15,13 +16,15 @@ const SECTIONS = [
   ["vat", "VAT Declarations", ShieldCheck],
   ["equipment", "Equipment Donations", HandHeart],
   ["events", "Events & Bookings", Calendar],
+  ["guided", "Guided Listing", ClipboardList],
   ["xero", "Xero Sync", RefreshCw],
   ["enquiries", "Enquiries", MessageSquare],
   ["donations", "Financial Donations", HandHeart],
   ["users", "Users & Roles", Users],
+  ["redirects", "Redirects & SEO", Link2],
 ];
 
-const ROLES = ["customer", "super_admin", "shop_admin", "finance_admin", "content_admin", "events_admin", "support_admin", "readonly"];
+const ROLES = ["customer", "super_admin", "shop_admin", "finance_admin", "content_admin", "events_admin", "support_admin", "readonly", "product_contributor", "product_approver"];
 
 export default function Admin() {
   const { user, logout } = useAuth();
@@ -61,6 +64,8 @@ export default function Admin() {
         {section === "xero" && <Xero />}
         {section === "enquiries" && <Enquiries />}
         {section === "donations" && <Donations />}
+        {section === "guided" && <GuidedListing />}
+        {section === "redirects" && <Redirects />}
         {section === "users" && <UsersAdmin />}
       </main>
     </div>
@@ -117,7 +122,16 @@ function Products() {
   const [items, setItems] = useState([]);
   const [cats, setCats] = useState([]);
   const [edit, setEdit] = useState(null);
-  const load = () => api.get("/products?limit=200").then((r) => setItems(r.data.items));
+  const load = async () => {
+    const [pub, draft] = await Promise.all([
+      api.get("/products?limit=200"),
+      api.get("/admin/products-review").catch(() => ({ data: [] })),
+    ]);
+    const map = {};
+    [...pub.data.items, ...draft.data].forEach((p) => { map[p.id] = p; });
+    setItems(Object.values(map));
+  };
+  const approve = async (id) => { await api.post(`/products/${id}/approve`); toast.success("Published — now live in the shop"); load(); };
   useEffect(() => { load(); api.get("/categories?include_hidden=true").then((r) => setCats(r.data)); }, []);
 
   const save = async () => {
@@ -139,7 +153,9 @@ function Products() {
             <tr key={p.id} className={i % 2 ? "bg-brand-bone" : ""} data-testid={`product-row-${p.sku}`}>
               <td className="p-3 font-semibold">{p.name}</td><td className="p-3">{p.sku}</td><td className="p-3">{gbp(p.price_ex_vat)}</td>
               <td className="p-3">{p.vat_relief_eligible ? "Yes" : "No"}</td><td className="p-3">{p.available_qty}</td><td className="p-3">{p.status}</td>
-              <td className="p-3 whitespace-nowrap"><button onClick={() => setEdit({ ...p, images: (p.images || []).join(", ") })} className="text-brand-green font-semibold mr-3" data-testid={`edit-${p.sku}`}>Edit</button><button onClick={() => del(p.id)} className="text-brand-terracotta font-semibold">Delete</button></td>
+              <td className="p-3 whitespace-nowrap">
+                {(p.status === "draft" || p.status === "awaiting_approval") && <button onClick={() => approve(p.id)} className="text-[#1B5E20] font-bold mr-3" data-testid={`approve-${p.sku}`}>Publish</button>}
+                <button onClick={() => setEdit({ ...p, images: (p.images || []).join(", ") })} className="text-brand-green font-semibold mr-3" data-testid={`edit-${p.sku}`}>Edit</button><button onClick={() => del(p.id)} className="text-brand-terracotta font-semibold">Delete</button></td>
             </tr>
           ))}</tbody>
         </table>
@@ -362,3 +378,116 @@ function UsersAdmin() {
     </div>
   );
 }
+
+const GRADES = [
+  "Excellent, minimal signs of previous use.",
+  "Very good, light cosmetic signs of previous use.",
+  "Good, visible signs of previous use but fully functional.",
+  "Functional, noticeable cosmetic wear reflected in the price.",
+];
+const GUIDE_KEY = "gc_guided_draft";
+
+function GuidedListing() {
+  const [cats, setCats] = useState([]);
+  const [step, setStep] = useState(0);
+  const [data, setData] = useState(() => { try { return JSON.parse(localStorage.getItem(GUIDE_KEY)) || {}; } catch { return {}; } });
+  const [done, setDone] = useState(null);
+  useEffect(() => { api.get("/categories?include_hidden=true").then((r) => setCats(r.data)); }, []);
+  useEffect(() => { localStorage.setItem(GUIDE_KEY, JSON.stringify(data)); }, [data]);
+
+  const STEPS = [
+    { key: "name", q: "What is the item called?", hint: "Everyday name — e.g. Folding wheelchair", type: "text" },
+    { key: "sku", q: "Give it a short reference (SKU).", hint: "e.g. MOB-050", type: "text" },
+    { key: "category_id", q: "Which category does it belong to?", type: "category" },
+    { key: "condition", q: "What condition is it in?", type: "grade" },
+    { key: "price_ex_vat", q: "What price, before VAT? (£)", hint: "Roughly half the original price or less", type: "number" },
+    { key: "fulfilment_route", q: "How will people get it?", type: "route" },
+    { key: "description", q: "Describe it in a sentence or two.", type: "textarea" },
+  ];
+  const s = STEPS[step];
+  const val = data[s.key] ?? "";
+  const set = (v) => setData({ ...data, [s.key]: v });
+  const input = "w-full rounded-lg border border-[#8C8C8C] px-4 py-3 text-lg";
+  const canNext = s.key === "description" ? true : String(val).trim() !== "";
+
+  const finish = async () => {
+    try {
+      await api.post("/products", {
+        name: data.name, sku: data.sku, category_id: data.category_id || null,
+        description: data.description || "", condition: data.condition || GRADES[2],
+        price_ex_vat: Number(data.price_ex_vat) || 0, quantity_available: 1,
+        fulfilment_route: data.fulfilment_route || "hub_collection", status: "draft",
+      });
+      localStorage.removeItem(GUIDE_KEY); setDone(data.name); setData({}); setStep(0);
+      toast.success("Saved as a draft for approval");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+
+  if (done) return (
+    <div data-testid="guided-done"><H>Guided listing</H>
+      <Card><div className="flex items-center gap-2 text-[#1B5E20] font-bold text-xl mb-2"><CheckCircle2 /> "{done}" saved</div>
+      <p className="text-[#4A4A4D]">It's saved as a <strong>draft awaiting approval</strong>. An approver can publish it from the Products list. Thank you!</p>
+      <button onClick={() => setDone(null)} className="mt-4 bg-brand-green text-white rounded-full px-6 py-3 font-semibold">Add another item</button></Card>
+    </div>
+  );
+
+  return (
+    <div data-testid="guided-listing">
+      <H>Guided listing — one question at a time</H>
+      <Card className="max-w-xl">
+        <div className="h-2 bg-brand-bone rounded-full mb-6"><div className="h-2 bg-brand-lime rounded-full transition-all" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
+        <p className="text-sm text-[#4A4A4D] mb-1">Question {step + 1} of {STEPS.length} · saved automatically</p>
+        <h2 className="font-heading text-2xl font-bold text-brand-green mb-1">{s.q}</h2>
+        {s.hint && <p className="text-[#4A4A4D] mb-3">{s.hint}</p>}
+        <div className="mb-6">
+          {s.type === "text" && <input autoFocus className={input} value={val} onChange={(e) => set(e.target.value)} data-testid="guided-input" />}
+          {s.type === "number" && <input autoFocus type="number" step="0.01" className={input} value={val} onChange={(e) => set(e.target.value)} data-testid="guided-input" />}
+          {s.type === "textarea" && <textarea autoFocus rows={4} className={input} value={val} onChange={(e) => set(e.target.value)} data-testid="guided-input" />}
+          {s.type === "category" && <select className={`${input} bg-white`} value={val} onChange={(e) => set(e.target.value)} data-testid="guided-input"><option value="">Choose…</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+          {s.type === "grade" && <div className="space-y-2">{GRADES.map((g) => <label key={g} className={`block rounded-xl border-2 p-3 cursor-pointer ${val === g ? "border-brand-green bg-brand-bone" : "border-brand-border"}`}><input type="radio" className="mr-2 h-4 w-4" checked={val === g} onChange={() => set(g)} />{g}</label>)}</div>}
+          {s.type === "route" && <div className="space-y-2">{[["postable", "Postable (small, sent by courier)"], ["hub_collection", "Collection from Lichfield hub"], ["bulky_delivery", "Bulky delivery (we quote)"]].map(([k, lbl]) => <label key={k} className={`block rounded-xl border-2 p-3 cursor-pointer ${val === k ? "border-brand-green bg-brand-bone" : "border-brand-border"}`}><input type="radio" className="mr-2 h-4 w-4" checked={val === k} onChange={() => set(k)} />{lbl}</label>)}</div>}
+        </div>
+        <div className="flex justify-between">
+          <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-3 font-semibold disabled:opacity-40" data-testid="guided-back">Back</button>
+          {step < STEPS.length - 1
+            ? <button onClick={() => setStep(step + 1)} disabled={!canNext} className="bg-brand-green text-white rounded-full px-6 py-3 font-semibold disabled:opacity-40" data-testid="guided-next">Next</button>
+            : <button onClick={finish} disabled={!data.name || !data.sku} className="bg-brand-lime text-[#003d20] rounded-full px-6 py-3 font-bold disabled:opacity-40" data-testid="guided-finish">Save for approval</button>}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function Redirects() {
+  const [items, setItems] = useState([]);
+  const [f, setF] = useState({ from_path: "", to_path: "", status_code: 301 });
+  const load = () => api.get("/admin/redirects").then((r) => setItems(r.data));
+  useEffect(() => { load(); }, []);
+  const add = async (e) => { e.preventDefault(); await api.post("/admin/redirects", f); toast.success("Redirect saved"); setF({ from_path: "", to_path: "", status_code: 301 }); load(); };
+  const del = async (id) => { await api.delete(`/admin/redirects/${id}`); load(); };
+  const base = api.defaults.baseURL;
+  const input = "w-full rounded-lg border border-[#8C8C8C] px-3 py-2";
+  return (
+    <div data-testid="admin-redirects">
+      <H>Redirects & SEO</H>
+      <Card className="mb-6">
+        <div className="flex flex-wrap gap-4">
+          <a href={`${base}/sitemap.xml`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-5 py-2.5 font-semibold" data-testid="view-sitemap"><FileText size={18} /> View sitemap.xml</a>
+          <a href={`${base}/robots.txt`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold">View robots.txt</a>
+        </div>
+        <p className="text-[#4A4A4D] mt-3">Add 301 redirects from old WordPress URLs to new pages so search rankings carry over. Old paths that aren't found are checked against this list automatically.</p>
+      </Card>
+      <Card className="mb-6">
+        <form onSubmit={add} className="grid sm:grid-cols-3 gap-3 items-end">
+          <div><label className="font-semibold">Old path</label><input required className={input} placeholder="/old-shop/wheelchairs" value={f.from_path} onChange={(e) => setF({ ...f, from_path: e.target.value })} data-testid="redirect-from" /></div>
+          <div><label className="font-semibold">New path</label><input required className={input} placeholder="/shop?category_id=..." value={f.to_path} onChange={(e) => setF({ ...f, to_path: e.target.value })} data-testid="redirect-to" /></div>
+          <button className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="redirect-add">Add redirect</button>
+        </form>
+      </Card>
+      <Card className="overflow-x-auto p-0"><table className="w-full text-left"><thead className="bg-brand-bone"><tr><th className="p-3">From</th><th className="p-3">To</th><th className="p-3">Code</th><th className="p-3"></th></tr></thead>
+        <tbody>{items.map((r, i) => <tr key={r.id} className={i % 2 ? "bg-brand-bone" : ""}><td className="p-3">{r.from_path}</td><td className="p-3">{r.to_path}</td><td className="p-3">{r.status_code}</td><td className="p-3"><button onClick={() => del(r.id)} className="text-brand-terracotta font-semibold">Delete</button></td></tr>)}
+        {items.length === 0 && <tr><td className="p-3 text-[#4A4A4D]" colSpan={4}>No redirects yet.</td></tr>}</tbody></table></Card>
+    </div>
+  );
+}
+

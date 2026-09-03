@@ -61,6 +61,10 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - Deliverable: 3 homepage visual directions PDF at /frontend/public/grace-cares-visual-directions.pdf (Direction 1 built).
 - Deferred (documented, not done): money-as-integer-pence refactor; true SSR/server-rendered HTML; separate Stock table; one-Contact-with-roles CRM; 3 fulfilment routes (postable/hub/bulky questionnaire); Grace AI; partner portals; Google Merchant/Meta feeds; sitemap.xml/robots.txt; admin draft→approve gate; guided one-question volunteer product form.
 
-## Next tasks
+## v3 round 2 (this session)
+- Built: **3 fulfilment routes** (postable / Lichfield hub collection / bulky delivery with an access questionnaire captured on the order); **draft→approve** workflow (product_contributor drafts, product_approver/shop_admin publish; drafts hidden from public shop + sitemap); **guided one-question-at-a-time listing form** with localStorage autosave (saves as draft for approval); **Grace AI** stub assistant (rule-based, refuses clinical/suitability + VAT-eligibility questions and offers a human with call button); **sitemap.xml + robots.txt** (backend) + **301 redirect manager** (admin CRUD + automatic resolution on 404 via NotFound page).
+- Verified via API: draft hidden from public list, products-review lists drafts, redirect resolve works, Grace AI refuses with handoff.
+
+## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

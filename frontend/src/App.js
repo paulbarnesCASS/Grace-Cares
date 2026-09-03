@@ -31,6 +31,8 @@ import Register from "@/pages/Register";
 import { ForgotPassword, ResetPassword } from "@/pages/PasswordReset";
 import Account from "@/pages/Account";
 import Admin from "@/pages/Admin";
+import GraceAI from "@/pages/GraceAI";
+import NotFound from "@/pages/NotFound";
 
 const withLayout = (el) => <Layout>{el}</Layout>;
 
@@ -69,7 +71,9 @@ function App() {
             <Route path="/forgot-password" element={withLayout(<ForgotPassword />)} />
             <Route path="/reset-password" element={withLayout(<ResetPassword />)} />
             <Route path="/account" element={withLayout(<Account />)} />
+            <Route path="/grace-ai" element={withLayout(<GraceAI />)} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="*" element={withLayout(<NotFound />)} />
           </Routes>
         </BrowserRouter>
       </CartProvider>

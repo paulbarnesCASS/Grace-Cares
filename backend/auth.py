@@ -16,6 +16,7 @@ JWT_ALGORITHM = "HS256"
 ADMIN_ROLES = {
     "super_admin", "shop_admin", "finance_admin",
     "content_admin", "events_admin", "support_admin", "readonly",
+    "product_contributor", "product_approver",
 }
 # roles allowed to see sensitive medical/support data
 SENSITIVE_ROLES = {"super_admin", "finance_admin", "support_admin"}

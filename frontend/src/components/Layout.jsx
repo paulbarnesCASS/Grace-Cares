@@ -130,6 +130,7 @@ export function Footer() {
             <li><Link to="/get-help" className="hover:underline">Get Help & Support</Link></li>
             <li><Link to="/nhs" className="hover:underline">NHS & Care Providers</Link></li>
             <li><Link to="/get-involved" className="hover:underline">Volunteer</Link></li>
+            <li><Link to="/grace-ai" className="hover:underline">Ask Grace (assistant)</Link></li>
             <li><Link to="/privacy" className="hover:underline">Privacy & Cookies</Link></li>
           </ul>
         </div>

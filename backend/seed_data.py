@@ -2,7 +2,7 @@
 shows a 'REAL PHOTO TO REPLACE' placeholder (no stock photos of people, per v3)."""
 from core import db, now_utc
 
-SEED_VERSION = "v3-1"
+SEED_VERSION = "v3-3"
 
 # v3 data-model category set (confirmed by client)
 CATEGORIES = [
@@ -30,6 +30,7 @@ def _p(name, sku, cat, desc, grade, price, relief, qty, model="unique", **extra)
          "quantity_available": qty, "quantity_reserved": 0, "images": [],
          "stock_model": model, "listing_type": "sale", "status": "available",
          "fulfilment_options": ["collection", "delivery"], "delivery_charge": 25.0,
+         "fulfilment_route": extra.pop("fulfilment_route", "hub_collection"),
          "specifications": {}, "featured": False}
     d.update(extra)
     return d
@@ -38,14 +39,14 @@ def _p(name, sku, cat, desc, grade, price, relief, qty, model="unique", **extra)
 PRODUCTS = [
     _p("Self-Propel Folding Wheelchair", "MOB-001", "mobility", "Lightweight self-propel folding wheelchair, fully serviced and cleaned.", G_VERY_GOOD, 145.0, True, 1, "unique", max_user_weight="115 kg", dimensions="94 x 66 x 91 cm", carbon_saving_kg=42.0, featured=True, safety_info="Brakes tested and fully functional. Please check the user weight limit before use."),
     _p("Attendant Transit Wheelchair", "MOB-002", "mobility", "Compact attendant-controlled transit wheelchair — a repeat-stock item.", G_GOOD, 89.0, True, 4, "repeat", max_user_weight="100 kg", carbon_saving_kg=38.0),
-    _p("Aluminium Walking Frame", "MOB-003", "mobility", "Lightweight walking frame, cleaned and checked, non-slip ferrules fitted.", G_GOOD, 22.0, True, 6, "repeat", carbon_saving_kg=6.0),
+    _p("Aluminium Walking Frame", "MOB-003", "mobility", "Lightweight walking frame, cleaned and checked, non-slip ferrules fitted.", G_GOOD, 22.0, True, 6, "repeat", carbon_saving_kg=6.0, fulfilment_route="postable"),
     _p("Four-Wheel Rollator with Seat", "MOB-004", "mobility", "Height-adjustable rollator with padded seat and bag.", G_VERY_GOOD, 55.0, True, 3, "repeat", max_user_weight="135 kg", carbon_saving_kg=12.0, featured=True),
-    _p("Electric Profiling Care Bed", "BED-001", "beds", "Fully adjustable electric profiling bed with remote. PAT tested.", G_VERY_GOOD, 380.0, True, 1, "unique", dimensions="200 x 90 cm", max_user_weight="180 kg", carbon_saving_kg=120.0, delivery_charge=60.0, featured=True, safety_info="Electrically tested (PAT). Professional delivery and set-up recommended."),
+    _p("Electric Profiling Care Bed", "BED-001", "beds", "Fully adjustable electric profiling bed with remote. PAT tested.", G_VERY_GOOD, 380.0, True, 1, "unique", dimensions="200 x 90 cm", max_user_weight="180 kg", carbon_saving_kg=120.0, delivery_charge=60.0, featured=True, fulfilment_route="bulky_delivery", safety_info="Electrically tested (PAT). Professional delivery and set-up recommended."),
     _p("Pressure-Relieving Mattress", "BED-002", "beds", "Cleaned pressure-relieving foam mattress in excellent condition.", G_EXCELLENT, 95.0, True, 1, "unique", dimensions="200 x 90 x 15 cm", carbon_saving_kg=30.0),
     _p("Wall-Mounted Shower Seat", "BATH-001", "bathing", "Sturdy fold-down shower seat, rejuvenated and deep cleaned.", G_GOOD, 35.0, True, 2, "repeat", max_user_weight="130 kg", carbon_saving_kg=8.0, safety_info="Requires secure fixing to a solid wall. Professional fitting advised."),
     _p("Bath Lift", "BATH-002", "bathing", "Battery bath lift, serviced with a fresh battery.", G_VERY_GOOD, 120.0, True, 1, "unique", max_user_weight="140 kg", carbon_saving_kg=22.0),
     _p("Patient Hoist with Sling", "MH-001", "moving-handling", "Mobile patient hoist supplied with a clean sling. Load tested.", G_GOOD, 295.0, True, 1, "unique", max_user_weight="150 kg", carbon_saving_kg=85.0, delivery_charge=60.0, safety_info="Load tested. Training in safe use strongly recommended."),
-    _p("Riser Recliner Armchair", "SEAT-001", "seating", "Dual-motor riser recliner armchair, upholstery cleaned. Remote included.", G_VERY_GOOD, 210.0, False, 1, "unique", carbon_saving_kg=70.0, delivery_charge=60.0, safety_info="Standard VAT applies — this item is not currently approved for VAT relief."),
+    _p("Riser Recliner Armchair", "SEAT-001", "seating", "Dual-motor riser recliner armchair, upholstery cleaned. Remote included.", G_VERY_GOOD, 210.0, False, 1, "unique", carbon_saving_kg=70.0, delivery_charge=60.0, fulfilment_route="bulky_delivery", safety_info="Standard VAT applies — this item is not currently approved for VAT relief."),
     _p("Perching Stool", "SEAT-002", "seating", "Height-adjustable perching stool, cleaned and checked.", G_GOOD, 18.0, True, 5, "repeat", carbon_saving_kg=4.0),
     _p("Bedside Commode", "TOIL-001", "toilet-aids", "Height-adjustable bedside commode with removable bucket. Sanitised.", G_GOOD, 28.0, True, 3, "repeat", carbon_saving_kg=7.0),
     _p("Raised Toilet Seat", "TOIL-002", "toilet-aids", "Clip-on raised toilet seat, thoroughly sanitised.", G_GOOD, 15.0, True, 4, "repeat", carbon_saving_kg=3.0),

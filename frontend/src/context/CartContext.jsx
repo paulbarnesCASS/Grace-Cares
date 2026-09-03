@@ -22,6 +22,7 @@ export function CartProvider({ children }) {
         product_id: product.id, name: product.name, sku: product.sku,
         price_ex_vat: product.price_ex_vat, vat_rate: product.vat_rate,
         vat_relief_eligible: product.vat_relief_eligible, image: (product.images || [])[0],
+        fulfilment_route: product.fulfilment_route || "hub_collection",
         quantity: Math.min(qty, max), max,
       }];
     });

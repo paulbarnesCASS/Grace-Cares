@@ -110,6 +110,7 @@ class ProductBody(BaseModel):
     delivery_charge: float = 0
     listing_type: str = "sale"  # sale or hire
     stock_model: str = "unique"  # unique or repeat
+    fulfilment_route: str = "hub_collection"  # postable, hub_collection, bulky_delivery
     status: str = "available"  # available, reserved, sold, hidden
     related_ids: List[str] = []
     safety_info: Optional[str] = ""
@@ -139,7 +140,7 @@ async def list_products(
     sort: str = "recent", limit: int = 60, skip: int = 0,
 ):
     await release_expired_reservations()
-    query = {"status": {"$ne": "hidden"}}
+    query = {"status": {"$nin": ["hidden", "draft", "awaiting_approval"]}}
     if category_id:
         query["category_id"] = category_id
     if condition:
@@ -210,9 +211,11 @@ async def admin_get_product(pid: str, user=Depends(require_admin("shop_admin")))
 
 
 @shop_router.post("/products")
-async def create_product(body: ProductBody, user=Depends(require_admin("shop_admin"))):
+async def create_product(body: ProductBody, user=Depends(require_admin("shop_admin", "product_contributor", "product_approver"))):
     doc = body.model_dump()
     doc["quantity_reserved"] = 0
+    if user["role"] == "product_contributor":
+        doc["status"] = "draft"  # contributors cannot publish
     doc["created_at"] = now_utc()
     res = await db.products.insert_one(doc)
     await record_stock_movement(str(res.inserted_id), body.quantity_available, "initial_stock")
@@ -221,14 +224,18 @@ async def create_product(body: ProductBody, user=Depends(require_admin("shop_adm
 
 
 @shop_router.put("/products/{pid}")
-async def update_product(pid: str, body: ProductBody, user=Depends(require_admin("shop_admin"))):
+async def update_product(pid: str, body: ProductBody, user=Depends(require_admin("shop_admin", "product_contributor", "product_approver"))):
     before = await db.products.find_one({"_id": ObjectId(pid)})
     if not before:
         raise HTTPException(404, "Product not found")
+    upd_body = body.model_dump()
+    if user["role"] == "product_contributor":
+        # contributors edit drafts only and can never publish
+        upd_body["status"] = "draft"
     # VAT eligibility change requires finance or super admin
     if before.get("vat_relief_eligible") != body.vat_relief_eligible and user["role"] not in ("super_admin", "finance_admin"):
         raise HTTPException(403, "Only finance or super administrators can change VAT eligibility")
-    upd = body.model_dump()
+    upd = upd_body
     if body.quantity_available != before.get("quantity_available"):
         diff = body.quantity_available - before.get("quantity_available", 0)
         await record_stock_movement(pid, diff, "manual_adjustment", note=f"by {user['email']}")
@@ -282,7 +289,8 @@ class CustomerDetails(BaseModel):
 class CheckoutBody(BaseModel):
     items: List[CheckoutItem]
     customer: CustomerDetails
-    fulfilment: str = "collection"  # collection or delivery
+    fulfilment: str = "collection"  # collection, postable, hub_collection, bulky_delivery, delivery
+    delivery_questionnaire: Optional[dict] = None
     vat_relief_claim: bool = False
     declaration: Optional[DeclarationData] = None
     donation_amount: float = 0
@@ -329,7 +337,7 @@ async def compute_order(body: CheckoutBody):
 
     delivery_ex = 0.0
     delivery_vat = 0.0
-    if body.fulfilment == "delivery":
+    if body.fulfilment in ("delivery", "postable"):
         # order-level delivery = max product delivery_charge (standard-rated)
         charges = []
         for it in body.items:
@@ -382,6 +390,7 @@ async def create_checkout(body: CheckoutBody, request: Request, user=Depends(get
         "reference": order_ref, "user_id": user["id"] if user else None,
         "customer": body.customer.model_dump(), "items": lines, "totals": totals,
         "fulfilment": body.fulfilment, "donation_amount": totals["donation"],
+        "delivery_questionnaire": body.delivery_questionnaire,
         "vat_relief_claim": body.vat_relief_claim, "declaration_id": declaration_id,
         "marketing_consent": body.marketing_consent,
         "status": "pending_payment", "payment_status": "pending",

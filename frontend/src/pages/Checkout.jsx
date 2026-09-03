@@ -9,7 +9,9 @@ export default function Checkout() {
   const { items, clear } = useCart();
   const nav = useNavigate();
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "", address_line1: "", address_line2: "", city: "", postcode: "" });
-  const [fulfilment, setFulfilment] = useState("collection");
+  const routesPresent = [...new Set(items.map((i) => i.fulfilment_route || "hub_collection"))];
+  const [fulfilment, setFulfilment] = useState(routesPresent[0] || "hub_collection");
+  const [questionnaire, setQuestionnaire] = useState({ property_type: "House", floors: "Ground floor", lift: "N/A", parking: "", access_notes: "", contact_phone: "" });
   const [donation, setDonation] = useState(0);
   const [marketing, setMarketing] = useState(false);
   const [terms, setTerms] = useState(false);
@@ -24,6 +26,7 @@ export default function Checkout() {
   const buildBody = () => ({
     items: items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
     customer, fulfilment,
+    delivery_questionnaire: fulfilment === "bulky_delivery" ? questionnaire : null,
     vat_relief_claim: claimingRelief,
     declaration: claimingRelief ? decl : null,
     donation_amount: Number(donation) || 0,
@@ -79,16 +82,37 @@ export default function Checkout() {
           </section>
 
           {/* Fulfilment */}
-          <section className="bg-white rounded-2xl border border-brand-border p-6">
-            <h2 className="font-heading text-2xl font-bold text-brand-green mb-4">Collection or delivery</h2>
-            <div className="grid sm:grid-cols-2 gap-3">
-              {["collection", "delivery"].map((f) => (
-                <label key={f} className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer ${fulfilment === f ? "border-brand-green bg-brand-bone" : "border-brand-border"}`} data-testid={`fulfilment-${f}`}>
-                  <input type="radio" name="fulfilment" checked={fulfilment === f} onChange={() => setFulfilment(f)} className="h-5 w-5" />
-                  <span className="font-semibold capitalize">{f === "collection" ? "Collection from Lichfield" : "Delivery (charge applies)"}</span>
-                </label>
-              ))}
+          <section className="bg-white rounded-2xl border border-brand-border p-6" data-testid="fulfilment-section">
+            <h2 className="font-heading text-2xl font-bold text-brand-green mb-1">How would you like to receive your items?</h2>
+            <p className="text-[#4A4A4D] mb-4">Options are based on the items in your basket.</p>
+            <div className="space-y-3">
+              {routesPresent.map((r) => {
+                const meta = {
+                  postable: ["Postage", "Small items sent by courier (postage added below)."],
+                  hub_collection: ["Collection from our Lichfield hub", "Free — collect Mon–Fri, 10am–3pm."],
+                  bulky_delivery: ["Delivery of a bulky item", "We'll ask a few access questions and quote delivery separately after your order."],
+                  collection: ["Collection from Lichfield", "Free collection."],
+                  delivery: ["Delivery", "Delivery charge applies."],
+                }[r] || [r, ""];
+                return (
+                  <label key={r} className={`flex items-start gap-3 rounded-xl border-2 p-4 cursor-pointer ${fulfilment === r ? "border-brand-green bg-brand-bone" : "border-brand-border"}`} data-testid={`fulfilment-${r}`}>
+                    <input type="radio" name="fulfilment" checked={fulfilment === r} onChange={() => setFulfilment(r)} className="h-5 w-5 mt-1" />
+                    <span><span className="font-semibold block">{meta[0]}</span><span className="text-[#4A4A4D] text-base">{meta[1]}</span></span>
+                  </label>
+                );
+              })}
             </div>
+            {fulfilment === "bulky_delivery" && (
+              <div className="mt-4 border-t border-brand-border pt-4 grid sm:grid-cols-2 gap-3" data-testid="delivery-questionnaire">
+                <p className="sm:col-span-2 font-semibold text-brand-green">Delivery access questions (so we can quote and deliver safely):</p>
+                <div><label className={label}>Property type</label><select className={input} value={questionnaire.property_type} onChange={(e) => setQuestionnaire({ ...questionnaire, property_type: e.target.value })} data-testid="q-property"><option>House</option><option>Bungalow</option><option>Flat / apartment</option><option>Care setting</option></select></div>
+                <div><label className={label}>Which floor?</label><select className={input} value={questionnaire.floors} onChange={(e) => setQuestionnaire({ ...questionnaire, floors: e.target.value })} data-testid="q-floor"><option>Ground floor</option><option>First floor</option><option>Second floor or higher</option></select></div>
+                <div><label className={label}>Is there a lift?</label><select className={input} value={questionnaire.lift} onChange={(e) => setQuestionnaire({ ...questionnaire, lift: e.target.value })}><option>N/A</option><option>Yes</option><option>No</option></select></div>
+                <div><label className={label}>Parking / vehicle access</label><input className={input} value={questionnaire.parking} onChange={(e) => setQuestionnaire({ ...questionnaire, parking: e.target.value })} /></div>
+                <div className="sm:col-span-2"><label className={label}>Access notes (steps, narrow doors, gravel, etc.)</label><textarea rows={2} className={input} value={questionnaire.access_notes} onChange={(e) => setQuestionnaire({ ...questionnaire, access_notes: e.target.value })} data-testid="q-notes" /></div>
+                <div className="sm:col-span-2"><label className={label}>Best contact number for delivery</label><input className={input} value={questionnaire.contact_phone} onChange={(e) => setQuestionnaire({ ...questionnaire, contact_phone: e.target.value })} data-testid="q-phone" /></div>
+              </div>
+            )}
           </section>
 
           {/* VAT relief */}
