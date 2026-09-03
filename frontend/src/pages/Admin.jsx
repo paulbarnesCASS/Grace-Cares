@@ -56,7 +56,7 @@ export default function Admin() {
         </div>
       </aside>
       <main className="flex-1 p-8 overflow-auto">
-        {section === "dashboard" && <Dashboard />}
+        {section === "dashboard" && <Dashboard onNavigate={setSection} />}
         {section === "products" && <Products />}
         {section === "orders" && <Orders />}
         {section === "vat" && <VatDeclarations />}
@@ -89,7 +89,7 @@ function presetRange(p) {
   return ["", ""];
 }
 
-function Dashboard() {
+function Dashboard({ onNavigate }) {
   const [s, setS] = useState(null);
   const [notes, setNotes] = useState([]);
   const [preset, setPreset] = useState("this_month");
@@ -152,12 +152,34 @@ function Dashboard() {
     return <span className={`text-xs font-semibold ${up ? "text-[#1B5E20]" : "text-brand-terracotta"}`} title={`vs previous period`}>{up ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}% vs prev</span>;
   };
   const periodLabel = from || to ? `${from || "start"} → ${to || "now"}` : "all time";
+  const noteSection = (n) => {
+    const k = (n.kind || "").toLowerCase();
+    if (k.includes("listing") || k.includes("product") || k.includes("stock")) return "products";
+    if (k.includes("order") || k.includes("delivery") || k.includes("refund")) return "orders";
+    if (k.includes("donation")) return "donations";
+    if (k.includes("booking") || k.includes("event")) return "events";
+    if (k.includes("enquir")) return "enquiries";
+    return "dashboard";
+  };
+  const clickNote = async (n) => {
+    try { await api.post(`/admin/notifications/${n.id}/read`); } catch { /* ignore */ }
+    setNotes((prev) => prev.filter((x) => x.id !== n.id));
+    onNavigate?.(noteSection(n));
+  };
   return (
     <div data-testid="admin-dashboard">
       {notes.length > 0 && (
-        <div className="bg-brand-lime/30 border border-brand-lime rounded-xl p-4 mb-6 flex items-start gap-2" data-testid="notifications-banner">
-          <Bell size={20} className="text-brand-green shrink-0 mt-0.5" />
-          <div><strong className="text-brand-green">{notes.length} notification{notes.length > 1 ? "s" : ""}:</strong> <span className="text-[#2D2D30]">{notes.slice(0, 3).map((n) => n.message).join(" · ")}</span></div>
+        <div className="bg-brand-lime/30 border border-brand-lime rounded-xl p-4 mb-6" data-testid="notifications-banner">
+          <div className="flex items-center gap-2 mb-2"><Bell size={20} className="text-brand-green shrink-0" /><strong className="text-brand-green">{notes.length} notification{notes.length > 1 ? "s" : ""}</strong></div>
+          <ul className="space-y-1">
+            {notes.slice(0, 6).map((n) => (
+              <li key={n.id}>
+                <button onClick={() => clickNote(n)} className="text-left w-full text-[#2D2D30] hover:text-brand-green hover:underline flex items-start gap-1" data-testid={`notification-${n.id}`}>
+                  <span>{n.message}</span><span className="text-brand-green text-sm shrink-0">›</span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
@@ -837,9 +859,11 @@ function VatDeclarations() {
 
 const ED_STATUSES = ["new", "under_review", "more_info", "accepted", "collection_arranged", "dropoff_arranged", "received", "declined", "closed"];
 function EquipmentDonations() {
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [cats, setCats] = useState([]);
   const [stock, setStock] = useState(null); // prefilled product being added
+  const canPublish = ["super_admin", "shop_admin", "product_approver"].includes(user?.role);
   const load = () => api.get("/admin/equipment-donations").then((r) => setItems(r.data));
   useEffect(() => { load(); api.get("/categories?include_hidden=true").then((r) => setCats(r.data)).catch(() => {}); }, []);
   const setStatus = async (id, status) => { await api.put(`/admin/equipment-donations/${id}`, { status }); toast.success("Updated"); load(); };
@@ -848,27 +872,35 @@ function EquipmentDonations() {
     setStock({
       ...EMPTY_PRODUCT,
       _donationId: d.id, _ref: d.reference,
-      name: d.equipment_type || "", sku: d.reference || "",
+      name: d.equipment_type || "", sku: "",
       description: d.notes || "", condition: GRADE(d.condition),
-      status: "draft", images: "",
+      status: "draft", images: (d.photos && d.photos.length) ? d.photos.join(", ") : "",
+      dimensions: d.dimensions || "",
     });
   };
-  const saveStock = async () => {
-    if (!stock.name?.trim() || !stock.sku?.trim()) return toast.error("Name and SKU are required");
+  const suggestSku = async (catId) => {
+    if (!catId) return;
+    try { const r = await api.get(`/admin/next-sku?category_id=${catId}`); setStock((prev) => prev ? { ...prev, sku: r.data.sku } : prev); }
+    catch { /* ignore */ }
+  };
+  const saveStock = async (publish) => {
+    if (!stock.name?.trim()) return toast.error("Name is required");
+    if (!stock.sku?.trim()) return toast.error("Choose a category to generate a SKU, or enter one");
     if (!(Number(stock.price_ex_vat) >= 0)) return toast.error("Enter a valid price");
     const b = {
-      ...stock,
+      ...stock, status: publish ? "available" : "draft",
       price_ex_vat: Number(stock.price_ex_vat) || 0,
       quantity_available: Number(stock.quantity_available) || 1,
       weight_kg: Number(stock.weight_kg) || 0, vat_rate: Number(stock.vat_rate) || 0.2,
       carbon_saving_kg: Number(stock.carbon_saving_kg) || 0, delivery_charge: Number(stock.delivery_charge) || 0,
       images: typeof stock.images === "string" ? stock.images.split(",").map((s) => s.trim()).filter(Boolean) : stock.images,
     };
+    const donationId = stock._donationId;
     delete b._donationId; delete b._ref;
     try {
-      await api.post("/products", b);
-      await api.put(`/admin/equipment-donations/${stock._donationId}`, { status: "received" });
-      toast.success("Added to stock as a draft — publish it from Products when ready");
+      const res = await api.post("/products", b);
+      await api.put(`/admin/equipment-donations/${donationId}`, { status: "received", listed_product_id: res.data.id, listed_product_sku: res.data.sku });
+      toast.success(publish ? "Added to stock and published" : "Added to stock as a draft — publish it from Products when ready");
       setStock(null); load();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
@@ -879,9 +911,13 @@ function EquipmentDonations() {
       <div className="space-y-3">{items.map((d) => (
         <Card key={d.id}>
           <div className="flex justify-between flex-wrap gap-2 items-start">
-            <div><strong>{d.equipment_type}</strong> from {d.donor_name} · {d.postcode} · Ref {d.reference}<div className="text-[#4A4A4D]">{d.email} · {d.phone} · Condition: {d.condition} · {d.working ? "Working" : "Not working"}</div></div>
+            <div>
+              <strong>{d.equipment_type}</strong> from {d.donor_name} · {d.postcode} · Ref {d.reference}
+              <div className="text-[#4A4A4D]">{d.email} · {d.phone} · Condition: {d.condition} · {d.working ? "Working" : "Not working"}</div>
+              {d.listed_product_id && <a href={`/product/${d.listed_product_id}`} target="_blank" rel="noreferrer" className="text-brand-green font-semibold text-sm underline inline-flex items-center gap-1 mt-1" data-testid={`ed-listed-${d.reference}`}>Listed as product {d.listed_product_sku} →</a>}
+            </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => addToStock(d)} className="inline-flex items-center gap-1 bg-brand-terracotta text-white rounded-full px-4 py-2 font-semibold text-sm" data-testid={`ed-addstock-${d.reference}`}><Plus size={16} /> Add to stock</button>
+              {!d.listed_product_id && <button onClick={() => addToStock(d)} className="inline-flex items-center gap-1 bg-brand-terracotta text-white rounded-full px-4 py-2 font-semibold text-sm" data-testid={`ed-addstock-${d.reference}`}><Plus size={16} /> Add to stock</button>}
               <select value={d.status} onChange={(e) => setStatus(d.id, e.target.value)} className="rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" data-testid={`ed-status-${d.reference}`}>{ED_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select>
             </div>
           </div>
@@ -893,21 +929,25 @@ function EquipmentDonations() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-auto" onClick={() => setStock(null)}>
           <div className="bg-white rounded-2xl p-7 max-w-2xl w-full my-8 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()} data-testid="addstock-modal">
             <h2 className="font-heading text-2xl font-bold text-brand-green mb-1">Add donation to stock</h2>
-            <p className="text-[#4A4A4D] text-sm mb-4">From donation {stock._ref}. Saved as a <strong>draft</strong> for approval before it goes live.</p>
+            <p className="text-[#4A4A4D] text-sm mb-4">From donation {stock._ref}. Pick a category and a tidy SKU is generated automatically.</p>
             <div className="grid sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2"><label className="font-semibold">Name *</label><input className={input} value={stock.name} onChange={(e) => setStock({ ...stock, name: e.target.value })} data-testid="as-name" /></div>
-              <div><label className="font-semibold">SKU *</label><input className={input} value={stock.sku} onChange={(e) => setStock({ ...stock, sku: e.target.value })} data-testid="as-sku" /></div>
-              <div><label className="font-semibold">Category</label><select className={`${input} bg-white`} value={stock.category_id || ""} onChange={(e) => setStock({ ...stock, category_id: e.target.value })} data-testid="as-category"><option value="">—</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+              <div><label className="font-semibold">Category</label><select className={`${input} bg-white`} value={stock.category_id || ""} onChange={(e) => { const cid = e.target.value; setStock({ ...stock, category_id: cid }); suggestSku(cid); }} data-testid="as-category"><option value="">—</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+              <div><label className="font-semibold">SKU *</label><input className={input} value={stock.sku} placeholder="Select a category…" onChange={(e) => setStock({ ...stock, sku: e.target.value })} data-testid="as-sku" /></div>
               <div><label className="font-semibold">Price ex VAT (£) *</label><input type="number" step="0.01" className={input} value={stock.price_ex_vat} onChange={(e) => setStock({ ...stock, price_ex_vat: e.target.value })} data-testid="as-price" /></div>
               <div><label className="font-semibold">Quantity</label><input type="number" className={input} value={stock.quantity_available} onChange={(e) => setStock({ ...stock, quantity_available: e.target.value })} data-testid="as-qty" /></div>
               <div><label className="font-semibold">Condition</label><select className={`${input} bg-white`} value={stock.condition} onChange={(e) => setStock({ ...stock, condition: e.target.value })} data-testid="as-condition"><option>Very Good</option><option>Good</option><option>Fair</option></select></div>
               <div><label className="font-semibold">Weight (kg)</label><input type="number" step="0.1" className={input} value={stock.weight_kg} onChange={(e) => setStock({ ...stock, weight_kg: e.target.value })} data-testid="as-weight" /></div>
               <div><label className="font-semibold">Fulfilment route</label><select className={`${input} bg-white`} value={stock.fulfilment_route} onChange={(e) => setStock({ ...stock, fulfilment_route: e.target.value })} data-testid="as-route"><option value="postable">Postable</option><option value="hub_collection">Hub collection</option><option value="bulky_delivery">Bulky delivery</option></select></div>
               <div className="sm:col-span-2"><label className="font-semibold">Description</label><textarea rows={3} className={input} value={stock.description} onChange={(e) => setStock({ ...stock, description: e.target.value })} data-testid="as-description" /></div>
-              <div className="sm:col-span-2"><label className="font-semibold">Image URLs (comma separated)</label><input className={input} value={stock.images} onChange={(e) => setStock({ ...stock, images: e.target.value })} data-testid="as-images" /></div>
+              <div className="sm:col-span-2"><label className="font-semibold">Image URLs (comma separated)</label><input className={input} value={stock.images} onChange={(e) => setStock({ ...stock, images: e.target.value })} data-testid="as-images" />{stock.images ? <p className="text-xs text-[#1B5E20] mt-1">Photos carried over from the donation.</p> : null}</div>
               <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={stock.vat_relief_eligible} onChange={(e) => setStock({ ...stock, vat_relief_eligible: e.target.checked })} className="h-5 w-5" data-testid="as-vat-relief" /> Eligible for VAT relief</label>
             </div>
-            <div className="flex gap-3 mt-5"><button onClick={saveStock} className="bg-brand-green text-white rounded-full px-6 py-3 font-semibold" data-testid="as-save">Add to stock</button><button onClick={() => setStock(null)} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-3 font-semibold">Cancel</button></div>
+            <div className="flex gap-3 mt-5 flex-wrap">
+              <button onClick={() => saveStock(false)} className="bg-brand-green text-white rounded-full px-6 py-3 font-semibold" data-testid="as-save">Save as draft</button>
+              {canPublish && <button onClick={() => saveStock(true)} className="bg-brand-terracotta text-white rounded-full px-6 py-3 font-semibold" data-testid="as-save-publish">Save &amp; publish</button>}
+              <button onClick={() => setStock(null)} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-3 font-semibold">Cancel</button>
+            </div>
           </div>
         </div>
       )}
@@ -1003,12 +1043,72 @@ function Enquiries() {
 
 function Donations() {
   const [items, setItems] = useState([]);
-  useEffect(() => { api.get("/admin/donations").then((r) => setItems(r.data)).catch(() => {}); }, []);
+  const [selected, setSelected] = useState(null);
+  const [preset, setPreset] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const base = api.defaults.baseURL;
+  const qs = () => {
+    const p = new URLSearchParams();
+    if (from) p.set("date_from", from);
+    if (to) p.set("date_to", to);
+    return p.toString();
+  };
+  const load = () => { const q = qs(); api.get(`/admin/donations${q ? `?${q}` : ""}`).then((r) => setItems(r.data)).catch(() => {}); };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [from, to]);
+  const applyPreset = (p) => { setPreset(p); if (p === "all") { setFrom(""); setTo(""); } else if (p !== "custom") { const [f, t] = presetRange(p); setFrom(f); setTo(t); } };
+  const reportUrl = (path) => `${base}/admin/${path}${qs() ? `?${qs()}` : ""}`;
+  const total = items.reduce((a, d) => a + (d.amount || 0), 0);
+  const dt = (v) => v ? new Date(v).toLocaleString("en-GB") : "—";
   return (
     <div data-testid="admin-donations">
       <H>Financial donations</H>
+      <Card className="mb-5" data-testid="donations-report-controls">
+        <div className="flex flex-wrap gap-2 mb-3">
+          {DASH_PRESETS.map(([k, lbl]) => (
+            <button key={k} onClick={() => applyPreset(k)} className={`rounded-full px-4 py-2 font-semibold text-sm border-2 ${preset === k ? "border-brand-green bg-brand-green text-white" : "border-brand-border text-brand-green"}`} data-testid={`don-preset-${k}`}>{lbl}</button>
+          ))}
+        </div>
+        {preset === "custom" && (
+          <div className="grid sm:grid-cols-2 gap-3 max-w-lg mb-3">
+            <div><label className="text-sm font-semibold block mb-1">From</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="don-from" /></div>
+            <div><label className="text-sm font-semibold block mb-1">To</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={to} onChange={(e) => setTo(e.target.value)} data-testid="don-to" /></div>
+          </div>
+        )}
+        <div className="flex items-center gap-3 flex-wrap">
+          <a href={reportUrl("donations-export.csv")} className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-5 py-2.5 font-semibold" data-testid="don-csv"><Download size={18} /> CSV</a>
+          <a href={reportUrl("donations-report.xlsx")} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold" data-testid="don-xlsx"><Download size={18} /> Excel report</a>
+          <a href={reportUrl("donations-report.pdf")} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold" data-testid="don-pdf"><Download size={18} /> PDF report</a>
+          <span className="text-[#4A4A4D]">{items.length} donation{items.length === 1 ? "" : "s"} · {gbp(total)}</span>
+        </div>
+      </Card>
       <Card className="overflow-x-auto p-0"><table className="w-full text-left"><thead className="bg-brand-bone"><tr><th className="p-3">Ref</th><th className="p-3">Donor</th><th className="p-3">Amount</th><th className="p-3">Recurring</th><th className="p-3">Status</th></tr></thead>
-        <tbody>{items.map((d, i) => <tr key={d.id} className={i % 2 ? "bg-brand-bone" : ""}><td className="p-3">{d.reference}</td><td className="p-3">{d.name}</td><td className="p-3">{gbp(d.amount)}</td><td className="p-3">{d.recurring ? "Monthly" : "One-off"}</td><td className="p-3">{d.payment_status}</td></tr>)}</tbody></table></Card>
+        <tbody>{items.map((d, i) => (
+          <tr key={d.id} className={`${i % 2 ? "bg-brand-bone" : ""} cursor-pointer hover:bg-brand-lime/20`} onClick={() => setSelected(d)} data-testid={`donation-row-${d.reference}`}>
+            <td className="p-3 font-semibold text-brand-green underline">{d.reference}</td><td className="p-3">{d.name}</td><td className="p-3">{gbp(d.amount)}</td><td className="p-3">{d.recurring ? "Monthly" : "One-off"}</td><td className="p-3">{d.payment_status}</td>
+          </tr>
+        ))}{items.length === 0 && <tr><td colSpan={5} className="p-4 text-[#4A4A4D]">No donations in this period.</td></tr>}</tbody></table></Card>
+
+      {selected && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-auto" onClick={() => setSelected(null)}>
+          <div className="bg-white rounded-2xl p-7 max-w-lg w-full my-8 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()} data-testid="donation-detail-modal">
+            <div className="flex justify-between items-start mb-4">
+              <h2 className="font-heading text-2xl font-bold text-brand-green">Donation {selected.reference}</h2>
+              <button onClick={() => setSelected(null)} className="text-2xl leading-none text-[#4A4A4D] px-2" data-testid="donation-close">×</button>
+            </div>
+            <div className="space-y-2">
+              {[["Donor", selected.name], ["Email", selected.email], ["Amount", gbp(selected.amount)],
+                ["Type", selected.recurring ? "Monthly recurring" : "One-off"], ["Status", selected.payment_status],
+                ["Xero", selected.xero_sync_status], ["Date", dt(selected.created_at)],
+                ["Message", selected.message || "—"], ["Dedication", selected.dedication || "—"]].map(([l, v]) => (
+                <div key={l} className="grid grid-cols-[130px_1fr] gap-2 border-b border-brand-border pb-1.5">
+                  <span className="font-semibold text-brand-green text-sm">{l}</span><span className="text-sm break-words">{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

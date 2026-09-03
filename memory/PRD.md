@@ -115,6 +115,15 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 ## v3 round 14 (this session — 2026-06)
 - **"Add to stock" from equipment donations**: each donation submission (Admin → Equipment Donations) now has an **Add to stock** button that opens a new-product window pre-filled from the donation (name ← equipment type, SKU ← donation ref, condition mapped to grade, description ← notes). Admin completes the required fields (price, category, quantity, weight, fulfilment route, VAT relief) and saves; product is created as a **draft** via `POST /products` (goes through the existing approval/publish workflow) and the donation is auto-advanced to `received`. Verified end-to-end: draft "Wheelchair" (ED-14193004, £45) created and listed in Products with Publish action.
 
+## v3 round 15 (this session — 2026-06)
+- **Auto category-based SKU**: `GET /admin/next-sku?category_id=` returns the next tidy SKU continuing the category's existing sequence (e.g. Mobility → MOB-005). In the Add-to-stock modal, picking a category auto-fills the SKU (editable).
+- **Publish shortcut**: Add-to-stock modal offers "Save as draft" and (for super_admin/shop_admin/product_approver) "Save & publish" (creates product with status `available`).
+- **Photo carry-over**: donation `photos` prefill the new product's Image URLs field.
+- **Link-back**: on save, the donation stores `listed_product_id`/`listed_product_sku` (extended `EDUpdateBody`), advances to `received`, and the card shows a "Listed as product <sku> →" link to the storefront; the Add-to-stock button then disappears.
+- **Financial Donations page**: rows are clickable → detail modal; date-range presets (default All time) + custom dates filter the list (`/admin/donations?date_from&date_to`); CSV/Excel/PDF reports (`/admin/donations-export.csv`, `/admin/donations-report.xlsx`, `/admin/donations-report.pdf`) honour the range, styled/branded with totals.
+- **Clickable notification banner**: each dashboard notification is a button that marks itself read and navigates to the relevant section (new listing → Products, order/refund → Orders, donation → Donations, booking → Events, enquiry → Enquiries).
+- Tested by testing_agent (frontend) — 100%, no issues (iteration_2.json).
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

@@ -74,8 +74,18 @@ async def _finalize_donation(donation_id, pi):
 
 
 @content_router.get("/admin/donations")
-async def list_donations(user=Depends(require_admin("finance_admin"))):
-    docs = await db.donations.find().sort("created_at", -1).to_list(500)
+async def list_donations(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                         user=Depends(require_admin("finance_admin"))):
+    from datetime import datetime as _dt, timezone as _tz
+    q = {}
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            rng["$gte"] = _dt.fromisoformat(date_from).replace(tzinfo=_tz.utc)
+        if date_to:
+            rng["$lte"] = _dt.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=_tz.utc)
+        q["created_at"] = rng
+    docs = await db.donations.find(q).sort("created_at", -1).to_list(2000)
     return cleans(docs)
 
 
@@ -123,6 +133,8 @@ class EDUpdateBody(BaseModel):
     status: Optional[str] = None
     assigned_to: Optional[str] = None
     note: Optional[str] = None
+    listed_product_id: Optional[str] = None
+    listed_product_sku: Optional[str] = None
 
 
 @content_router.put("/admin/equipment-donations/{did}")
@@ -132,6 +144,9 @@ async def update_equipment_donation(did: str, body: EDUpdateBody, user=Depends(r
         upd["status"] = body.status
     if body.assigned_to is not None:
         upd["assigned_to"] = body.assigned_to
+    if body.listed_product_id is not None:
+        upd["listed_product_id"] = body.listed_product_id
+        upd["listed_product_sku"] = body.listed_product_sku
     ops = {"$set": upd} if upd else {}
     if body.note:
         ops["$push"] = {"internal_notes": {"note": body.note, "by": user["email"], "at": now_utc()}}

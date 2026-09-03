@@ -82,6 +82,112 @@ COMPARE_KEYS = ["total_sales_inc_vat", "total_sales_ex_vat", "total_vat", "zero_
                 "equipment_saved", "event_bookings", "resource_downloads", "email_signups"]
 
 
+async def _donations_in_range(date_from, date_to):
+    from datetime import datetime as _dt, timezone as _tz
+    q = {}
+    r = {}
+    if date_from:
+        r["$gte"] = _dt.fromisoformat(date_from).replace(tzinfo=_tz.utc)
+    if date_to:
+        r["$lte"] = _dt.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=_tz.utc)
+    if r:
+        q["created_at"] = r
+    return await db.donations.find(q).sort("created_at", -1).to_list(5000)
+
+
+def _don_rows(docs):
+    def dts(v):
+        return v.strftime("%d/%m/%Y") if hasattr(v, "strftime") else str(v or "")
+    return [[dts(d.get("created_at")), d.get("reference", ""), d.get("name", ""), d.get("email", ""),
+             round(d.get("amount", 0) or 0, 2), "Monthly" if d.get("recurring") else "One-off",
+             d.get("payment_status", "")] for d in docs]
+
+
+DON_COLS = ["Date", "Reference", "Donor", "Email", "Amount (£)", "Type", "Status"]
+
+
+@admin_router.get("/admin/donations-export.csv")
+async def donations_export_csv(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                               user=Depends(require_admin("finance_admin"))):
+    docs = await _donations_in_range(date_from, date_to)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(DON_COLS)
+    for row in _don_rows(docs):
+        w.writerow(row)
+    return Response(content=out.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=grace-cares-donations.csv"})
+
+
+@admin_router.get("/admin/donations-report.xlsx")
+async def donations_report_xlsx(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                user=Depends(require_admin("finance_admin"))):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    docs = await _donations_in_range(date_from, date_to)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Donations"
+    ws.append(DON_COLS)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="006738")
+        cell.alignment = Alignment(horizontal="center")
+    total = 0.0
+    for row in _don_rows(docs):
+        ws.append(row)
+        total += row[4]
+    ws.append([])
+    ws.append(["", "", "", "Total", round(total, 2), "", ""])
+    for cell in ws[ws.max_row]:
+        cell.font = Font(bold=True)
+    for i, wdt in enumerate([14, 16, 24, 28, 12, 12, 14], start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = wdt
+    ws.freeze_panes = "A2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(content=buf.getvalue(),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename=grace-cares-donations.xlsx"})
+
+
+@admin_router.get("/admin/donations-report.pdf")
+async def donations_report_pdf(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                               user=Depends(require_admin("finance_admin"))):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    docs = await _donations_in_range(date_from, date_to)
+    rows = _don_rows(docs)
+    total = round(sum(r[4] for r in rows), 2)
+    green = colors.HexColor("#006738")
+    ss = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=green, fontSize=18, spaceAfter=2)
+    sub = ParagraphStyle("sub", parent=ss["Normal"], fontSize=9, textColor=colors.HexColor("#4A4A4D"))
+    period = f"{date_from or 'start'} to {date_to or 'now'}" if (date_from or date_to) else "all time"
+    data = [DON_COLS] + [[r[0], r[1], r[2], r[3], f"£{r[4]:,.2f}", r[5], r[6]] for r in rows]
+    data.append(["", "", "", "Total", f"£{total:,.2f}", "", ""])
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=16 * mm, bottomMargin=16 * mm,
+                            leftMargin=14 * mm, rightMargin=14 * mm, title="Grace Cares donations report")
+    t = Table(data, colWidths=[22 * mm, 26 * mm, 34 * mm, 44 * mm, 22 * mm, 20 * mm, 20 * mm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), green), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F3F7F4")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D9E4DD")),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"), ("TEXTCOLOR", (0, -1), (-1, -1), green),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    doc.build([Paragraph("Grace Cares — Financial donations", h1),
+               Paragraph(f"Period: {period} · {len(rows)} donation(s) · Total £{total:,.2f}", sub),
+               Spacer(1, 8), t])
+    return Response(content=buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": "inline; filename=grace-cares-donations.pdf"})
+
+
 @admin_router.get("/admin/reports/summary")
 async def report_summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
                          user=Depends(require_admin("finance_admin", "readonly", "shop_admin"))):

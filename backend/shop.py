@@ -283,6 +283,33 @@ async def create_product(body: ProductBody, user=Depends(require_admin("shop_adm
     return clean(await db.products.find_one({"_id": res.inserted_id}))
 
 
+@shop_router.get("/admin/next-sku")
+async def next_sku(category_id: str, user=Depends(require_admin("shop_admin", "product_contributor", "product_approver"))):
+    """Suggest a tidy category-based SKU like MOB-014 (continues the category's existing sequence)."""
+    import re
+    from collections import Counter
+    cat = await db.categories.find_one({"_id": ObjectId(category_id)}) if ObjectId.is_valid(category_id) else None
+    prods = await db.products.find({"category_id": category_id}).to_list(5000)
+    counter, maxnum = Counter(), {}
+    for p in prods:
+        m = re.match(r"^([A-Za-z]+)-(\d+)$", (p.get("sku") or "").strip())
+        if m:
+            pref = m.group(1).upper()
+            counter[pref] += 1
+            maxnum[pref] = max(maxnum.get(pref, 0), int(m.group(2)))
+    if counter:
+        prefix = counter.most_common(1)[0][0]
+    else:
+        base = re.sub(r"[^A-Za-z]", "", ((cat or {}).get("slug") or (cat or {}).get("name") or "GEN"))
+        prefix = (base[:3] or "GEN").upper()
+    mx = maxnum.get(prefix, 0)
+    for p in await db.products.find({"sku": {"$regex": f"^{prefix}-\\d+$"}}).to_list(5000):
+        m = re.match(rf"^{prefix}-(\d+)$", (p.get("sku") or ""))
+        if m:
+            mx = max(mx, int(m.group(1)))
+    return {"sku": f"{prefix}-{mx + 1:03d}", "prefix": prefix}
+
+
 @shop_router.put("/products/{pid}")
 async def update_product(pid: str, body: ProductBody, user=Depends(require_admin("shop_admin", "product_contributor", "product_approver"))):
     before = await db.products.find_one({"_id": ObjectId(pid)})

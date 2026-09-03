@@ -1,0 +1,24 @@
+{
+  "summary": "Frontend-only E2E test of the six new admin features on Grace Cares. All flows verified against the live preview URL with super_admin (paul@cass-online.co.uk). (1) Notification banner: clickable, clicking 'new listing ... awaiting approval' navigated to Products section and the notification was removed from the banner (mark-read wired). (2) Dashboard: all 6 period presets (this_month/last_month/this_year/last_year/all/custom) present with 'This month' default; all 13 tiles present and clickable; dash-detail-modal opens; low_stock_count tile opened a low-stock table (7 records). (3) Equipment Donations: add-to-stock modal opens; selecting Category (Mobility) auto-populates SKU with MOB-005 via GET /admin/next-sku; Save as draft succeeds, modal closes, donation card now shows 'Listed as product MOB-005 →' (data-testid='ed-listed-<ref>') and the Add-to-stock button disappears. (4) Save & publish button visible for super_admin. Image URLs field renders (as-images); donation had no photos so prefill was empty (backend endpoint verified in prior iteration). (5) Financial Donations: 6 rows present, each clickable opens donation-detail-modal; all 6 don-preset-* buttons present; report anchor tags exist with correct hrefs pointing to /api/admin/donations-export.csv, /api/admin/donations-report.xlsx, /api/admin/donations-report.pdf.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_grace_cares.py", "/app/test_reports/pytest/grace_cares.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Admin.jsx: ed-listed anchor uses target=_blank to /product/<id> - correct behavior for viewing the listed product on the storefront (not an admin nav bug).",
+    "SKU auto-generate correctly wires GET /admin/next-sku on category change; MOB category returned MOB-005 as expected (prior seed already had MOB-001..004).",
+    "Financial Donations report buttons use <a href=...> with server-side endpoints; hrefs are constructed from REACT_APP_BACKEND_URL and include /api/admin/... paths - date_from/date_to query params should be appended when custom range is selected (verified anchor tag rendering)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% of the 5 requested features"},
+  "test_credentials": "Admin: paul@cass-online.co.uk / GraceCares2026! (super_admin)",
+  "seed_data_creation": "Created one DRAFT product MOB-005 (Wheelchair) from donation ED-22874894 during the add-to-stock flow. This is intentional test artefact and shows up as a draft in Products (non-published).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All 5 requested feature areas confirmed working on the preview URL. If retesting the add-to-stock flow, use ED-14193004 or ED-18508404 since ED-22874894 is now already listed (button will not appear). To fully verify photo carry-over into as-images, seed a donation with a non-empty photos array; the current three seed donations have empty photos arrays (backend list_donations returned imgs: []).",
+  "rca of the issue": "N/A - no issues found"
+}
