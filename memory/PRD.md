@@ -97,6 +97,15 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Relief totals in declarations report**: `/admin/vat-declarations` list and `vat-declarations-export.csv` now include `order_total_paid` and `total_vat_relieved` (VAT that would have applied to relieved lines = 20% × ex-VAT). Verified £5.60 on a £28 order.
 - **Clickable declaration from an order**: if an order claimed relief, the modal shows "view declaration" which opens a popup layered over the order (`GET /api/admin/vat-declarations/{id}`) with the full declaration, relieved-item breakdown, and total relieved.
 
+## v3 round 11 (this session — 2026-06)
+- **Products & available-stock report (Excel + PDF)**: Admin → Products export panel now offers **Excel report** (`/admin/products-stock-report.xlsx`) and **PDF report** (`/admin/products-stock-report.pdf`) alongside CSV. All three honour the same category / stock-status / date filters. Columns: SKU, Name, Category, Condition, Status, Price ex VAT, VAT relief, Qty in stock, Reserved, Available now — with a totals row (product count + total available). Excel is styled (green frozen header, column widths); PDF is branded landscape. Shared `_query_products` helper in extra.py. Verified: xlsx 16 products/43 available, category filter → 4 mobility, PDF valid.
+
+## v3 round 10 (this session — 2026-06)
+- **Order confirmation emails (Resend)**: sent automatically to the customer on payment (in `finalize_paid_order`); resendable from the order detail view (`POST /api/admin/orders/{id}/send-confirmation`).
+- **Dispatch / collection emails**: marking an order `dispatched` or `ready_for_collection` auto-emails the customer; any other status can optionally email via a "notify customer" checkbox (`notify` flag on `PUT /admin/orders/{id}/status`).
+- **Timeline notes**: staff add free-text internal notes to an order (`POST /admin/orders/{id}/note`, `kind:"note"` in `status_history`), rendered in the activity timeline; status entries show a "customer emailed" marker.
+- **Saved report views**: finance can save a favourite declarations date range (`GET/PUT /admin/vat-report-view`) so the report opens ready. Shared email module `emails.py` (gate + send_email + templates); receipts.py now imports it.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

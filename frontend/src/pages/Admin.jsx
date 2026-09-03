@@ -174,6 +174,15 @@ function Products() {
     const q = qs.toString();
     return `${base}/admin/products-export.csv${q ? `?${q}` : ""}`;
   };
+  const reportUrl = (path) => {
+    const qs = new URLSearchParams();
+    if (expCat) qs.set("category", expCat);
+    if (expStock) qs.set("stock_status", expStock);
+    if (expFrom) qs.set("date_from", expFrom);
+    if (expTo) qs.set("date_to", expTo);
+    const q = qs.toString();
+    return `${base}/admin/${path}${q ? `?${q}` : ""}`;
+  };
   const uploadOneImage = async (fileObj) => {
     if (!fileObj) return;
     setUploadingImg(true);
@@ -239,6 +248,8 @@ function Products() {
           </div>
           <div className="flex gap-3 mt-4 flex-wrap">
             <a href={exportUrl()} className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="export-download"><Download size={18} /> Download CSV</a>
+            <a href={reportUrl("products-stock-report.xlsx")} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold" data-testid="export-excel"><Download size={18} /> Excel report</a>
+            <a href={reportUrl("products-stock-report.pdf")} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold" data-testid="export-pdf"><Download size={18} /> PDF report</a>
             <button onClick={() => { setExpCat(""); setExpStock(""); setExpFrom(""); setExpTo(""); }} className="border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold" data-testid="export-clear">Clear filters</button>
           </div>
         </Card>
@@ -338,6 +349,8 @@ function Orders() {
   const [declView, setDeclView] = useState(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [notifyCustomer, setNotifyCustomer] = useState(false);
+  const [noteText, setNoteText] = useState("");
   const load = () => api.get("/admin/orders").then((r) => setOrders(r.data));
   useEffect(() => { load(); }, []);
   const filtered = orders.filter((o) => {
@@ -352,7 +365,10 @@ function Orders() {
     const ev = [];
     if (o.created_at) ev.push(["Order placed", o.created_at, "#006738"]);
     if (o.paid_at) ev.push(["Payment received", o.paid_at, "#1B5E20"]);
-    (o.status_history || []).forEach((h) => ev.push([`Marked "${(h.status || "").replace(/_/g, " ")}"${h.by ? ` · ${h.by}` : ""}`, h.at, "#006738"]));
+    (o.status_history || []).forEach((h) => {
+      if (h.kind === "note") ev.push([`Note: ${h.note}${h.by ? ` · ${h.by}` : ""}`, h.at, "#8C8C8C"]);
+      else ev.push([`Marked "${(h.status || "").replace(/_/g, " ")}"${h.emailed ? " · customer emailed" : ""}${h.by ? ` · ${h.by}` : ""}`, h.at, "#006738"]);
+    });
     if (o.delivery_quote?.at) ev.push([`Delivery quote set (${gbp(o.delivery_quote.amount)})`, o.delivery_quote.at, "#006738"]);
     if (o.delivery_quote?.paid_at) ev.push(["Delivery paid", o.delivery_quote.paid_at, "#1B5E20"]);
     (o.refunds || []).forEach((r) => ev.push([`Refunded ${gbp(r.amount)}${r.by ? ` · ${r.by}` : ""}`, r.at, "#C85A40"]));
@@ -361,6 +377,19 @@ function Orders() {
   const openDecl = async (id) => {
     if (!id) return;
     try { const r = await api.get(`/admin/vat-declarations/${id}`); setDeclView(r.data); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const refreshSelected = async (id) => {
+    try { const r = await api.get(`/orders/${id}`); setSelected(r.data); } catch { /* keep current */ }
+    load();
+  };
+  const addNote = async () => {
+    if (!noteText.trim()) return;
+    try { await api.post(`/admin/orders/${selected.id}/note`, { note: noteText }); setNoteText(""); toast.success("Note added to timeline"); refreshSelected(selected.id); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const resendConfirmation = async () => {
+    try { const r = await api.post(`/admin/orders/${selected.id}/send-confirmation`); toast.success(`Confirmation emailed to ${r.data.sent_to}`); refreshSelected(selected.id); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
   const quote = async (o) => {
@@ -380,10 +409,9 @@ function Orders() {
   };
   const setStatus = async (o, status) => {
     try {
-      await api.put(`/admin/orders/${o.id}/status`, { status });
-      toast.success(`Order marked ${status.replace(/_/g, " ")}`);
-      setSelected({ ...o, status });
-      load();
+      const r = await api.put(`/admin/orders/${o.id}/status`, { status, notify: notifyCustomer });
+      toast.success(`Order marked ${status.replace(/_/g, " ")}${r.data.emailed ? " · customer emailed" : ""}`);
+      refreshSelected(o.id);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
   const dt = (v) => v ? new Date(v).toLocaleString("en-GB") : "—";
@@ -433,11 +461,12 @@ function Orders() {
               ))}
             </div>
 
-            <div className="flex items-center gap-2 mb-6 flex-wrap">
+            <div className="flex items-center gap-3 mb-6 flex-wrap">
               <label className="font-semibold text-sm">Update status:</label>
               <select className="rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" value={selected.status} onChange={(e) => setStatus(selected, e.target.value)} data-testid="order-status-select">
                 {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
               </select>
+              <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={notifyCustomer} onChange={(e) => setNotifyCustomer(e.target.checked)} className="h-4 w-4" data-testid="order-notify" /> Email the customer about this update</label>
             </div>
 
             <div className="grid sm:grid-cols-2 gap-5 mb-6">
@@ -495,6 +524,10 @@ function Orders() {
                 ))}
                 {buildTimeline(selected).length === 0 && <li className="text-[#4A4A4D] text-sm">No activity recorded yet.</li>}
               </ol>
+              <div className="mt-4 flex gap-2 border-t border-brand-border pt-3">
+                <input value={noteText} onChange={(e) => setNoteText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addNote(); }} placeholder="Add an internal note for the team…" className="flex-1 rounded-lg border border-[#8C8C8C] px-3 py-2 text-sm" data-testid="order-note-input" />
+                <button onClick={addNote} disabled={!noteText.trim()} className="bg-brand-green text-white rounded-full px-4 py-2 font-semibold text-sm disabled:opacity-50" data-testid="order-note-add">Add note</button>
+              </div>
             </div>
 
             {selected.delivery_quote && (
@@ -511,6 +544,7 @@ function Orders() {
             )}
 
             <div className="flex gap-3 flex-wrap">
+              <button onClick={resendConfirmation} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold" data-testid="order-resend-confirmation">Resend confirmation</button>
               {selected.payment_status === "paid" && selected.status !== "refunded" && <button onClick={() => refund(selected)} className="border-2 border-brand-terracotta text-brand-terracotta rounded-full px-6 py-2.5 font-semibold" data-testid="order-refund-btn">Refund</button>}
               {selected.fulfilment === "bulky_delivery" && selected.delivery_quote?.status !== "paid" && <button onClick={() => quote(selected)} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold">Set delivery quote</button>}
               <button onClick={() => setSelected(null)} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold ml-auto">Close</button>
@@ -628,6 +662,18 @@ function VatDeclarations() {
     api.get(`/admin/vat-declarations${q ? `?${q}` : ""}`).then((r) => setItems(r.data)).catch((e) => setErr(formatApiErrorDetail(e.response?.data?.detail)));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [from, to]);
+  useEffect(() => {
+    api.get("/admin/vat-report-view").then((r) => {
+      const v = r.data || {};
+      if (v.preset) setPreset(v.preset);
+      if (v.date_from) setFrom(v.date_from);
+      if (v.date_to) setTo(v.date_to);
+    }).catch(() => {});
+  }, []);
+  const saveView = async () => {
+    try { await api.put("/admin/vat-report-view", { preset, date_from: from || null, date_to: to || null }); toast.success("Saved — this report will open here next time"); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
 
   const PRESETS = [["all", "All time"], ["this_month", "This month"], ["last_month", "Last month"], ["this_year", "This calendar year"], ["last_year", "Last calendar year"], ["custom", "Custom dates"]];
 
@@ -660,6 +706,7 @@ function VatDeclarations() {
         )}
         <div className="flex items-center gap-4 flex-wrap">
           <a href={`${base}/admin/vat-declarations-export.csv${qs() ? `?${qs()}` : ""}`} className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="vat-export-download"><Download size={18} /> Download CSV</a>
+          <button onClick={saveView} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold" data-testid="vat-save-view">Save this view</button>
           <span className="text-[#4A4A4D]">{items.length} declaration{items.length === 1 ? "" : "s"}{(from || to) ? ` between ${from || "start"} and ${to || "now"}` : " in total"}</span>
         </div>
       </Card>

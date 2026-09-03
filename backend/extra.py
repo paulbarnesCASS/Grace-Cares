@@ -300,6 +300,148 @@ async def product_export(
     return _csv_response(rows, "grace-cares-products.csv")
 
 
+async def _query_products(category, stock_status, date_from, date_to):
+    """Shared filter used by the CSV/Excel/PDF stock reports. Returns (cat_name_map, docs)."""
+    from datetime import datetime as _dt, timezone as _tz
+    all_cats = await db.categories.find().to_list(200)
+    cat_name = {str(c["_id"]): c.get("name", "") for c in all_cats}
+    slug_map = {c.get("slug"): str(c["_id"]) for c in all_cats}
+    query = {}
+    if category:
+        cid = category if ObjectId.is_valid(category) else slug_map.get(category)
+        if cid:
+            query["category_id"] = cid
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            rng["$gte"] = _dt.fromisoformat(date_from).replace(tzinfo=_tz.utc)
+        if date_to:
+            rng["$lte"] = _dt.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=_tz.utc)
+        query["created_at"] = rng
+
+    def keep(p):
+        avail = (p.get("quantity_available", 0) or 0) - (p.get("quantity_reserved", 0) or 0)
+        if stock_status == "in_stock":
+            return avail > 0
+        if stock_status == "out_of_stock":
+            return avail <= 0
+        if stock_status == "low_stock":
+            return 0 < avail <= 1
+        return True
+
+    docs = [p for p in await db.products.find(query).sort("name", 1).to_list(5000) if keep(p)]
+    return cat_name, docs
+
+
+def _avail(p):
+    return (p.get("quantity_available", 0) or 0) - (p.get("quantity_reserved", 0) or 0)
+
+
+@extra_router.get("/admin/products-stock-report.xlsx")
+async def products_stock_xlsx(category: Optional[str] = None, stock_status: Optional[str] = None,
+                              date_from: Optional[str] = None, date_to: Optional[str] = None,
+                              user=Depends(require_admin("shop_admin", "product_approver", "finance_admin"))):
+    from openpyxl.styles import Font, PatternFill, Alignment
+    cat_name, docs = await _query_products(category, stock_status, date_from, date_to)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Stock report"
+    headers = ["SKU", "Name", "Category", "Condition", "Status", "Price ex VAT (£)",
+               "VAT relief", "Qty in stock", "Reserved", "Available now"]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="006738")
+        cell.alignment = Alignment(horizontal="center")
+    total_avail = 0
+    for p in docs:
+        av = _avail(p)
+        total_avail += max(av, 0)
+        ws.append([p.get("sku", ""), p.get("name", ""), cat_name.get(p.get("category_id"), ""),
+                   p.get("condition", ""), p.get("status", "available"),
+                   round(p.get("price_ex_vat", 0) or 0, 2),
+                   "Yes" if p.get("vat_relief_eligible") else "No",
+                   p.get("quantity_available", 0) or 0, p.get("quantity_reserved", 0) or 0, av])
+    ws.append([])
+    trow = ["", "", "", "", "", "", "", "Total products", len(docs), total_avail]
+    ws.append(trow)
+    for cell in ws[ws.max_row]:
+        cell.font = Font(bold=True)
+    widths = [16, 40, 20, 16, 14, 15, 11, 12, 10, 14]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return Response(content=buf.getvalue(),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename=grace-cares-stock-report.xlsx"})
+
+
+@extra_router.get("/admin/products-stock-report.pdf")
+async def products_stock_pdf(category: Optional[str] = None, stock_status: Optional[str] = None,
+                             date_from: Optional[str] = None, date_to: Optional[str] = None,
+                             user=Depends(require_admin("shop_admin", "product_approver", "finance_admin"))):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from html import escape as escape_x
+    cat_name, docs = await _query_products(category, stock_status, date_from, date_to)
+    green = colors.HexColor("#006738")
+    ss = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=ss["Title"], textColor=green, fontSize=18, spaceAfter=2)
+    sub = ParagraphStyle("sub", parent=ss["Normal"], fontSize=9, textColor=colors.HexColor("#4A4A4D"))
+    cell = ParagraphStyle("cell", parent=ss["Normal"], fontSize=8, leading=10)
+
+    filt = []
+    if category:
+        filt.append(f"category={category}")
+    if stock_status:
+        filt.append(f"stock={stock_status.replace('_', ' ')}")
+    if date_from or date_to:
+        filt.append(f"created {date_from or 'start'} to {date_to or 'now'}")
+    filt_txt = "; ".join(filt) if filt else "all products"
+
+    total_avail = sum(max(_avail(p), 0) for p in docs)
+    header = ["SKU", "Name", "Category", "Condition", "Status", "Price ex VAT", "VAT relief", "In stock", "Reserved", "Available"]
+    data = [header]
+    for p in docs:
+        data.append([p.get("sku", ""), Paragraph(escape_x(p.get("name", "")), cell),
+                     cat_name.get(p.get("category_id"), ""), Paragraph(escape_x(p.get("condition", "")), cell),
+                     p.get("status", "available"), f"£{(p.get('price_ex_vat', 0) or 0):,.2f}",
+                     "Yes" if p.get("vat_relief_eligible") else "No",
+                     p.get("quantity_available", 0) or 0, p.get("quantity_reserved", 0) or 0, _avail(p)])
+    data.append(["", "", "", "", "", "", "", f"Products: {len(docs)}", "Available:", total_avail])
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=14 * mm, bottomMargin=14 * mm,
+                            leftMargin=12 * mm, rightMargin=12 * mm, title="Grace Cares stock report")
+    els = [Paragraph("Grace Cares — Products &amp; available stock", h1),
+           Paragraph(f"Generated {now_utc().strftime('%d %B %Y, %H:%M')} · Filter: {filt_txt}", sub),
+           Spacer(1, 8)]
+    col_w = [22 * mm, 62 * mm, 30 * mm, 22 * mm, 24 * mm, 24 * mm, 18 * mm, 18 * mm, 20 * mm, 22 * mm]
+    t = Table(data, colWidths=col_w, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), green),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F3F7F4")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#D9E4DD")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, -1), (-1, -1), green),
+        ("ALIGN", (5, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    els.append(t)
+    doc.build(els)
+    return Response(content=buf.getvalue(), media_type="application/pdf",
+                    headers={"Content-Disposition": "inline; filename=grace-cares-stock-report.pdf"})
+
+
 @extra_router.post("/admin/products/import")
 async def product_import(body: ImportBody, user=Depends(require_admin("shop_admin", "product_approver"))):
     slug_to_id = {c.get("slug"): str(c["_id"]) for c in await db.categories.find().to_list(200)}

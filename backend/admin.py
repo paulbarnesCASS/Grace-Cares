@@ -241,6 +241,25 @@ async def vat_declarations_export(date_from: Optional[str] = None, date_to: Opti
                     headers={"Content-Disposition": f"attachment; filename={fn}.csv"})
 
 
+class ReportViewBody(BaseModel):
+    preset: str = "all"
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+
+@admin_router.get("/admin/vat-report-view")
+async def get_report_view(user=Depends(require_admin("finance_admin"))):
+    s = await db.site_settings.find_one({"key": "vat_report_view"})
+    return (s or {}).get("view", {"preset": "all", "date_from": None, "date_to": None})
+
+
+@admin_router.put("/admin/vat-report-view")
+async def set_report_view(body: ReportViewBody, user=Depends(require_admin("finance_admin"))):
+    await db.site_settings.update_one({"key": "vat_report_view"},
+        {"$set": {"key": "vat_report_view", "view": body.model_dump()}}, upsert=True)
+    return {"ok": True, "view": body.model_dump()}
+
+
 class VatStatementBody(BaseModel):
     statement: dict
 

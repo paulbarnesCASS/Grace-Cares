@@ -11,6 +11,7 @@ from bson import ObjectId
 
 from core import db, now_utc, clean, cleans
 from auth import get_current_user, get_optional_user, require_admin
+from emails import send_order_confirmation, send_order_status_update
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY") or "sk_test_emergent"
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
@@ -519,6 +520,13 @@ async def finalize_paid_order(order_id: str, payment_intent: str = None):
                                {"$set": {"status": "paid", "payment_status": "paid",
                                          "stripe_payment_intent": payment_intent,
                                          "paid_at": now_utc(), "xero_sync_status": "queued"}})
+    # order confirmation email (failure must not break payment finalisation)
+    try:
+        fresh = await db.orders.find_one({"_id": ObjectId(order_id)})
+        await send_order_confirmation(fresh)
+        await db.orders.update_one({"_id": ObjectId(order_id)}, {"$set": {"confirmation_emailed_at": now_utc()}})
+    except Exception as e:
+        print(f"[EMAIL] order confirmation failed for {order.get('reference')}: {e}")
     # queue Xero sync (mocked)
     await db.xero_sync_queue.insert_one({
         "order_id": order_id, "order_ref": order["reference"], "type": "invoice",
@@ -661,17 +669,59 @@ async def refund_order(oid: str, body: RefundBody, user=Depends(require_admin("f
 class OrderStatusBody(BaseModel):
     status: str
     note: Optional[str] = ""
+    notify: bool = False
+
+
+AUTO_EMAIL_STATUSES = {"dispatched", "ready_for_collection"}
 
 
 @shop_router.put("/admin/orders/{oid}/status")
 async def update_order_status(oid: str, body: OrderStatusBody, user=Depends(require_admin("shop_admin"))):
     o = await db.orders.find_one({"_id": ObjectId(oid)})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    should_email = body.notify or body.status in AUTO_EMAIL_STATUSES
+    emailed = False
+    if should_email:
+        try:
+            emailed = bool(await send_order_status_update(o, body.status, body.note))
+        except Exception as e:
+            print(f"[EMAIL] status update failed for {o.get('reference')}: {e}")
     await db.orders.update_one({"_id": ObjectId(oid)},
         {"$set": {"status": body.status},
-         "$push": {"status_history": {"status": body.status, "at": now_utc(),
-                                      "by": user["email"], "note": body.note}}})
+         "$push": {"status_history": {"kind": "status", "status": body.status, "at": now_utc(),
+                                      "by": user["email"], "note": body.note, "emailed": emailed}}})
     await log_audit(user, "update_status", "order", oid, {"status": o.get("status")}, {"status": body.status})
+    return {"ok": True, "emailed": emailed}
+
+
+class NoteBody(BaseModel):
+    note: str
+
+
+@shop_router.post("/admin/orders/{oid}/note")
+async def add_order_note(oid: str, body: NoteBody, user=Depends(require_admin("shop_admin", "finance_admin"))):
+    if not body.note.strip():
+        raise HTTPException(400, "Note cannot be empty")
+    res = await db.orders.update_one({"_id": ObjectId(oid)},
+        {"$push": {"status_history": {"kind": "note", "note": body.note.strip(),
+                                      "at": now_utc(), "by": user["email"]}}})
+    if not res.matched_count:
+        raise HTTPException(404, "Order not found")
+    await log_audit(user, "note", "order", oid, after={"note": body.note.strip()})
     return {"ok": True}
+
+
+@shop_router.post("/admin/orders/{oid}/send-confirmation")
+async def resend_order_confirmation(oid: str, user=Depends(require_admin("shop_admin", "finance_admin"))):
+    o = await db.orders.find_one({"_id": ObjectId(oid)})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    email_id = await send_order_confirmation(o)
+    if not email_id:
+        raise HTTPException(400, "No customer email is stored on this order")
+    await db.orders.update_one({"_id": ObjectId(oid)}, {"$set": {"confirmation_emailed_at": now_utc()}})
+    return {"ok": True, "email_id": email_id, "sent_to": o.get("customer", {}).get("email")}
 
 
 # ---------------- Wishlist / item requests ----------------
