@@ -14,29 +14,47 @@ admin_router = APIRouter(prefix="/api")
 
 
 # ---------------- Reporting ----------------
+def _range_on(field, date_from, date_to):
+    from datetime import datetime as _dt, timezone as _tz
+    q = {}
+    if date_from:
+        q["$gte"] = _dt.fromisoformat(date_from).replace(tzinfo=_tz.utc)
+    if date_to:
+        q["$lte"] = _dt.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=_tz.utc)
+    return {field: q} if q else {}
+
+
 @admin_router.get("/admin/reports/summary")
-async def report_summary(user=Depends(require_admin("finance_admin", "readonly", "shop_admin"))):
-    orders = await db.orders.find({"payment_status": "paid"}).to_list(5000)
+async def report_summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                         user=Depends(require_admin("finance_admin", "readonly", "shop_admin"))):
+    rng = _range_on("created_at", date_from, date_to)
+    order_q = {"payment_status": "paid", **rng}
+    orders = await db.orders.find(order_q).to_list(5000)
     total_ex = sum(o["totals"]["subtotal_ex_vat"] for o in orders)
     total_vat = sum(o["totals"]["vat_total"] for o in orders)
     total_sales = sum(o["totals"]["total_payable"] for o in orders)
     zero_rated = sum(o["totals"]["subtotal_ex_vat"] for o in orders
                      if any(l.get("vat_relief_applied") for l in o.get("items", [])))
-    donations = await db.donations.find({"payment_status": "paid"}).to_list(5000)
+    donations = await db.donations.find({"payment_status": "paid", **rng}).to_list(5000)
     donation_total = sum(d["amount"] for d in donations)
     order_donations = sum(o.get("donation_amount", 0) for o in orders)
     refunds = sum(o.get("refund_amount", 0) for o in orders if o.get("refund_amount"))
     products = await db.products.find().to_list(5000)
+    carbon_map = {str(p["_id"]): (p.get("carbon_saving_kg", 0) or 0) for p in products}
+    items_saved, carbon = 0, 0.0
+    for o in orders:
+        for it in o.get("items", []):
+            q = it.get("quantity", 1) or 1
+            items_saved += q
+            carbon += carbon_map.get(it.get("product_id"), 0) * q
     low_stock = [clean(p) for p in products
                  if (p.get("quantity_available", 0) - p.get("quantity_reserved", 0)) <= 1
                  and p.get("status") != "sold"]
-    carbon = sum((p.get("carbon_saving_kg", 0) or 0) for p in products if p.get("status") == "sold")
     aov = round(total_sales / len(orders), 2) if orders else 0
-    bookings = await db.event_bookings.count_documents({"status": "confirmed"})
-    downloads = await db.resource_downloads.count_documents({})
-    subs = await db.subscribers.count_documents({})
-    eq_donations = await db.equipment_donations.count_documents({})
-    items_saved = await db.products.count_documents({"status": "sold"})
+    bookings = await db.event_bookings.count_documents({"status": "confirmed", **rng})
+    downloads = await db.resource_downloads.count_documents(_range_on("at", date_from, date_to))
+    subs = await db.subscribers.count_documents({**rng})
+    eq_donations = await db.equipment_donations.count_documents({**rng})
     return {
         "total_sales_inc_vat": round(total_sales, 2),
         "total_sales_ex_vat": round(total_ex, 2),
@@ -59,6 +77,82 @@ async def report_summary(user=Depends(require_admin("finance_admin", "readonly",
         "resource_downloads": downloads,
         "email_signups": subs,
     }
+
+
+@admin_router.get("/admin/reports/details")
+async def report_details(metric: str, date_from: Optional[str] = None, date_to: Optional[str] = None,
+                         user=Depends(require_admin("finance_admin", "readonly", "shop_admin"))):
+    rng = _range_on("created_at", date_from, date_to)
+
+    def dts(v):
+        return v.strftime("%d/%m/%Y") if hasattr(v, "strftime") else str(v or "")
+
+    if metric in ("total_sales_inc_vat", "total_sales_ex_vat", "total_vat", "orders",
+                  "average_order_value", "orders_count", "zero_rated_sales", "refunds_total"):
+        q = {"payment_status": "paid", **rng}
+        if metric == "refunds_total":
+            q["refund_amount"] = {"$gt": 0}
+        orders = await db.orders.find(q).sort("created_at", -1).to_list(3000)
+        if metric == "zero_rated_sales":
+            orders = [o for o in orders if any(l.get("vat_relief_applied") for l in o.get("items", []))]
+            cols = ["Date", "Reference", "Customer", "Relieved ex VAT (£)"]
+            rows = [[dts(o.get("created_at")), o.get("reference"), o.get("customer", {}).get("name"),
+                     round(sum(l["line_ex_vat"] for l in o["items"] if l.get("vat_relief_applied")), 2)] for o in orders]
+            return {"title": "Zero-rated (VAT relief) sales", "columns": cols, "rows": rows}
+        if metric == "refunds_total":
+            cols = ["Date", "Reference", "Customer", "Refund (£)"]
+            rows = [[dts(o.get("created_at")), o.get("reference"), o.get("customer", {}).get("name"),
+                     o.get("refund_amount", 0)] for o in orders]
+            return {"title": "Refunds", "columns": cols, "rows": rows}
+        cols = ["Date", "Reference", "Customer", "Ex VAT (£)", "VAT (£)", "Total (£)"]
+        rows = [[dts(o.get("created_at")), o.get("reference"), o.get("customer", {}).get("name"),
+                 o["totals"]["subtotal_ex_vat"], o["totals"]["vat_total"], o["totals"]["total_payable"]] for o in orders]
+        return {"title": "Paid orders", "columns": cols, "rows": rows}
+
+    if metric == "donations_total":
+        dons = await db.donations.find({"payment_status": "paid", **rng}).sort("created_at", -1).to_list(3000)
+        odons = await db.orders.find({"payment_status": "paid", "donation_amount": {"$gt": 0}, **rng}).sort("created_at", -1).to_list(3000)
+        cols = ["Date", "Source", "Donor", "Amount (£)"]
+        rows = [[dts(d.get("created_at")), "One-off / monthly", d.get("name") or d.get("email") or "Anonymous", d.get("amount", 0)] for d in dons]
+        rows += [[dts(o.get("created_at")), f"With order {o.get('reference')}", o.get("customer", {}).get("name"), o.get("donation_amount", 0)] for o in odons]
+        return {"title": "Donations", "columns": cols, "rows": rows}
+
+    if metric == "items_reused":
+        orders = await db.orders.find({"payment_status": "paid", **rng}).sort("created_at", -1).to_list(3000)
+        cols = ["Date", "Reference", "Item", "SKU", "Qty"]
+        rows = []
+        for o in orders:
+            for it in o.get("items", []):
+                rows.append([dts(o.get("created_at")), o.get("reference"), it.get("name"), it.get("sku"), it.get("quantity", 1)])
+        return {"title": "Items reused", "columns": cols, "rows": rows}
+
+    if metric == "event_bookings":
+        bs = await db.event_bookings.find({"status": "confirmed", **rng}).sort("created_at", -1).to_list(3000)
+        cols = ["Date", "Event", "Name", "Attendees"]
+        rows = [[dts(b.get("created_at")), b.get("event_name"), b.get("name"), b.get("num_attendees", 1)] for b in bs]
+        return {"title": "Event bookings", "columns": cols, "rows": rows}
+
+    if metric == "resource_downloads":
+        ds = await db.resource_downloads.find(_range_on("at", date_from, date_to)).sort("at", -1).to_list(3000)
+        rmap = {str(r["_id"]): (r.get("title") or r.get("name") or "") for r in await db.resources.find().to_list(500)}
+        cols = ["Date", "Resource", "Email"]
+        rows = [[dts(d.get("at")), rmap.get(d.get("resource_id"), d.get("resource_id", "")), d.get("email", "")] for d in ds]
+        return {"title": "Resource downloads", "columns": cols, "rows": rows}
+
+    if metric == "email_signups":
+        subs = await db.subscribers.find({**rng}).sort("created_at", -1).to_list(3000)
+        cols = ["Date", "Email", "Source"]
+        rows = [[dts(x.get("created_at")), x.get("email"), x.get("consent_source", "")] for x in subs]
+        return {"title": "Email signups", "columns": cols, "rows": rows}
+
+    if metric == "low_stock_count":
+        products = await db.products.find().to_list(5000)
+        low = [p for p in products if (p.get("quantity_available", 0) - p.get("quantity_reserved", 0)) <= 1 and p.get("status") != "sold"]
+        cols = ["SKU", "Name", "Available"]
+        rows = [[p.get("sku"), p.get("name"), max(0, (p.get("quantity_available", 0) - p.get("quantity_reserved", 0)))] for p in low]
+        return {"title": "Low stock", "columns": cols, "rows": rows}
+
+    raise HTTPException(400, "Unknown metric")
 
 
 @admin_router.get("/admin/reports/orders.csv")

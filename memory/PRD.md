@@ -106,6 +106,9 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Timeline notes**: staff add free-text internal notes to an order (`POST /admin/orders/{id}/note`, `kind:"note"` in `status_history`), rendered in the activity timeline; status entries show a "customer emailed" marker.
 - **Saved report views**: finance can save a favourite declarations date range (`GET/PUT /admin/vat-report-view`) so the report opens ready. Shared email module `emails.py` (gate + send_email + templates); receipts.py now imports it.
 
+## v3 round 12 (this session — 2026-06)
+- **Interactive dashboard**: date-range selector (defaults to **This month**, plus Last month, This/Last calendar year, All time, Custom dates) drives all tiles via `GET /admin/reports/summary?date_from&date_to`. Every tile is now **clickable** and opens a drill-down modal listing the records behind it via `GET /admin/reports/details?metric=&date_from&date_to` — money tiles → paid orders (date, ref, customer, ex-VAT, VAT, total), plus donations, refunds, zero-rated, items reused (order lines), event bookings, resource downloads (`at` field), email signups, and low stock. Range-aware metrics (orders, VAT, donations, items reused/carbon from paid-order lines in range); low stock is current-state. Verified: this-month filter, details endpoints (low stock → 6 rows), generic table renders.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

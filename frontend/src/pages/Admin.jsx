@@ -77,22 +77,71 @@ export default function Admin() {
 const H = ({ children }) => <h1 className="font-heading text-3xl font-bold text-brand-green mb-6">{children}</h1>;
 const Card = ({ children, className = "" }) => <div className={`bg-white rounded-xl border border-brand-border p-6 ${className}`}>{children}</div>;
 
+const DASH_PRESETS = [["this_month", "This month"], ["last_month", "Last month"], ["this_year", "This calendar year"], ["last_year", "Last calendar year"], ["all", "All time"], ["custom", "Custom dates"]];
+
+function isoDay(d) { return d.toISOString().slice(0, 10); }
+function presetRange(p) {
+  const now = new Date();
+  if (p === "this_month") return [isoDay(new Date(now.getFullYear(), now.getMonth(), 1)), isoDay(new Date(now.getFullYear(), now.getMonth() + 1, 0))];
+  if (p === "last_month") return [isoDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)), isoDay(new Date(now.getFullYear(), now.getMonth(), 0))];
+  if (p === "this_year") return [isoDay(new Date(now.getFullYear(), 0, 1)), isoDay(new Date(now.getFullYear(), 11, 31))];
+  if (p === "last_year") return [isoDay(new Date(now.getFullYear() - 1, 0, 1)), isoDay(new Date(now.getFullYear() - 1, 11, 31))];
+  return ["", ""];
+}
+
 function Dashboard() {
   const [s, setS] = useState(null);
   const [notes, setNotes] = useState([]);
+  const [preset, setPreset] = useState("this_month");
+  const [from, setFrom] = useState(() => presetRange("this_month")[0]);
+  const [to, setTo] = useState(() => presetRange("this_month")[1]);
+  const [detail, setDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const qs = () => {
+    const p = new URLSearchParams();
+    if (from) p.set("date_from", from);
+    if (to) p.set("date_to", to);
+    return p.toString();
+  };
   useEffect(() => {
-    api.get("/admin/reports/summary").then((r) => setS(r.data)).catch(() => {});
+    const q = qs();
+    api.get(`/admin/reports/summary${q ? `?${q}` : ""}`).then((r) => setS(r.data)).catch(() => {});
+    // eslint-disable-next-line
+  }, [from, to]);
+  useEffect(() => {
     api.get("/admin/notifications").then((r) => setNotes(r.data.filter((n) => !n.read))).catch(() => {});
   }, []);
+  const applyPreset = (p) => {
+    setPreset(p);
+    if (p !== "custom") { const [f, t] = presetRange(p); setFrom(f); setTo(t); }
+  };
+  const openDetail = async (metric, label) => {
+    setLoadingDetail(true); setDetail({ metric, label, columns: [], rows: [] });
+    const q = qs();
+    try {
+      const r = await api.get(`/admin/reports/details?metric=${metric}${q ? `&${q}` : ""}`);
+      setDetail({ metric, label, ...r.data });
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); setDetail(null); }
+    finally { setLoadingDetail(false); }
+  };
+
   if (!s) return <div>Loading…</div>;
   const stats = [
-    ["Total sales (inc VAT)", gbp(s.total_sales_inc_vat)], ["Sales ex VAT", gbp(s.total_sales_ex_vat)],
-    ["VAT collected", gbp(s.total_vat)], ["Zero-rated sales", gbp(s.zero_rated_sales)],
-    ["Donations", gbp(s.donations_total)], ["Refunds", gbp(s.refunds_total)],
-    ["Average order value", gbp(s.average_order_value)], ["Orders", s.orders_count],
-    ["Items reused", s.equipment_saved], ["Event bookings", s.event_bookings],
-    ["Resource downloads", s.resource_downloads], ["Email signups", s.email_signups],
+    ["Total sales (inc VAT)", gbp(s.total_sales_inc_vat), "total_sales_inc_vat"],
+    ["Sales ex VAT", gbp(s.total_sales_ex_vat), "total_sales_ex_vat"],
+    ["VAT collected", gbp(s.total_vat), "total_vat"],
+    ["Zero-rated sales", gbp(s.zero_rated_sales), "zero_rated_sales"],
+    ["Donations", gbp(s.donations_total), "donations_total"],
+    ["Refunds", gbp(s.refunds_total), "refunds_total"],
+    ["Average order value", gbp(s.average_order_value), "orders"],
+    ["Orders", s.orders_count, "orders"],
+    ["Items reused", s.equipment_saved, "items_reused"],
+    ["Event bookings", s.event_bookings, "event_bookings"],
+    ["Resource downloads", s.resource_downloads, "resource_downloads"],
+    ["Email signups", s.email_signups, "email_signups"],
   ];
+  const periodLabel = from || to ? `${from || "start"} → ${to || "now"}` : "all time";
   return (
     <div data-testid="admin-dashboard">
       {notes.length > 0 && (
@@ -101,22 +150,62 @@ function Dashboard() {
           <div><strong className="text-brand-green">{notes.length} notification{notes.length > 1 ? "s" : ""}:</strong> <span className="text-[#2D2D30]">{notes.slice(0, 3).map((n) => n.message).join(" · ")}</span></div>
         </div>
       )}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <H>Dashboard</H>
         <a href={`${api.defaults.baseURL}/admin/reports/orders.csv`} className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-5 py-2.5 font-semibold"><Download size={18} /> Export orders CSV</a>
       </div>
+      <Card className="mb-5">
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="font-semibold text-sm mr-1">Period:</span>
+          {DASH_PRESETS.map(([k, lbl]) => (
+            <button key={k} onClick={() => applyPreset(k)} className={`rounded-full px-4 py-2 font-semibold text-sm border-2 ${preset === k ? "border-brand-green bg-brand-green text-white" : "border-brand-border text-brand-green"}`} data-testid={`dash-preset-${k}`}>{lbl}</button>
+          ))}
+        </div>
+        {preset === "custom" && (
+          <div className="grid sm:grid-cols-2 gap-3 max-w-lg mt-3">
+            <div><label className="text-sm font-semibold block mb-1">From</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="dash-from" /></div>
+            <div><label className="text-sm font-semibold block mb-1">To</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={to} onChange={(e) => setTo(e.target.value)} data-testid="dash-to" /></div>
+          </div>
+        )}
+        <p className="text-sm text-[#4A4A4D] mt-2">Showing figures for: <strong>{periodLabel}</strong>. Click any tile to see the detail behind it.</p>
+      </Card>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {stats.map(([l, v]) => (
-          <Card key={l}><div className="text-3xl font-bold text-brand-terracotta font-heading">{v}</div><div className="text-[#4A4A4D] mt-1">{l}</div></Card>
+        {stats.map(([l, v, m]) => (
+          <button key={l} onClick={() => openDetail(m, l)} className="text-left bg-white rounded-2xl border border-brand-border p-5 hover:border-brand-green hover:shadow-md transition-[border-color,box-shadow] cursor-pointer" data-testid={`dash-tile-${m}`}>
+            <div className="text-3xl font-bold text-brand-terracotta font-heading">{v}</div>
+            <div className="text-[#4A4A4D] mt-1 flex items-center gap-1">{l} <span className="text-brand-green text-xs">›</span></div>
+          </button>
         ))}
       </div>
       <div className="grid md:grid-cols-2 gap-4">
         <Card><div className="flex items-center gap-2 font-bold text-brand-green mb-2"><Leaf size={20} /> Estimated carbon saved</div><div className="text-3xl font-bold">{s.estimated_carbon_saving_kg} kg CO₂e</div></Card>
-        <Card>
-          <div className="flex items-center gap-2 font-bold text-[#E65100] mb-2"><AlertTriangle size={20} /> Low stock ({s.low_stock_count})</div>
+        <button onClick={() => openDetail("low_stock_count", "Low stock")} className="text-left bg-white rounded-2xl border border-brand-border p-5 hover:border-brand-green hover:shadow-md transition-[border-color,box-shadow]" data-testid="dash-tile-low_stock_count">
+          <div className="flex items-center gap-2 font-bold text-[#E65100] mb-2"><AlertTriangle size={20} /> Low stock ({s.low_stock_count}) <span className="text-brand-green text-xs">›</span></div>
           <ul className="text-[#4A4A4D]">{s.low_stock_products.slice(0, 6).map((p) => <li key={p.id}>{p.name} ({Math.max(0, (p.quantity_available || 0) - (p.quantity_reserved || 0))} left)</li>)}</ul>
-        </Card>
+        </button>
       </div>
+
+      {detail && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-auto" onClick={() => setDetail(null)}>
+          <div className="bg-white rounded-2xl p-7 max-w-4xl w-full my-8 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()} data-testid="dash-detail-modal">
+            <div className="flex justify-between items-start mb-1">
+              <h2 className="font-heading text-2xl font-bold text-brand-green">{detail.label}</h2>
+              <button onClick={() => setDetail(null)} className="text-2xl leading-none text-[#4A4A4D] px-2" data-testid="dash-detail-close">×</button>
+            </div>
+            <p className="text-sm text-[#4A4A4D] mb-4">{periodLabel} · {detail.rows?.length || 0} record{(detail.rows?.length || 0) === 1 ? "" : "s"}</p>
+            {loadingDetail ? <p>Loading…</p> : (detail.rows?.length ? (
+              <div className="overflow-x-auto border border-brand-border rounded-xl">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-brand-bone"><tr>{detail.columns.map((c) => <th key={c} className="p-2 whitespace-nowrap">{c}</th>)}</tr></thead>
+                  <tbody>{detail.rows.map((row, i) => (
+                    <tr key={i} className={i % 2 ? "bg-brand-bone" : ""}>{row.map((cell, j) => <td key={j} className="p-2">{cell}</td>)}</tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : <p className="text-[#4A4A4D]">No records in this period.</p>)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
