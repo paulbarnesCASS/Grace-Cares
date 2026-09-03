@@ -1,0 +1,8 @@
+crons:
+  - name: weekly-prod-export
+    description: "Emails the team a product + stock export every Monday 8am UTC"
+    cron: "0 8 * * 1"
+    endpoint: "{{BASE_URL}}/api/cron/weekly-product-export"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

@@ -71,6 +71,12 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Bulky delivery quotes**: Admin → Orders "Set delivery quote" on bulky orders creates a Stripe payment link; paying it marks `delivery_quote.status=paid` (webhook + status handled).
 - **Redirect CSV import**: Admin → Redirects & SEO bulk-imports `old,new[,code]` CSV (upsert). Verified: imported 2.
 
+## v3 round 4 (this session)
+- **Excel + CSV upload**: `/api/admin/products/import-file` accepts `.xlsx`/`.csv` (openpyxl) with a `dry_run` flag.
+- **Import preview**: dry-run returns created/updated/error lists and writes nothing; Admin shows a preview then "Apply".
+- **Bulk photo import**: `/api/admin/products/import-photos` accepts a `.zip`, matches images to products by SKU (full stem or prefix), stored as base64 data URLs (deploy-safe, no pod-local files).
+- **Scheduled weekly export**: `.emergent/crons.yml` → Monday 08:00 UTC POST `/api/cron/weekly-product-export` (Bearer `WEBHOOK_CRON_SECRET`), builds the product+stock CSV and MOCK-emails admins; logged to `export_runs`. Verified: 401 without token, 200 with, dry-run writes nothing, xlsx round-trip creates/updates by SKU.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

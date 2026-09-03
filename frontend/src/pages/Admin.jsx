@@ -156,6 +156,28 @@ function Products() {
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
   const base = api.defaults.baseURL;
+  const [impFile, setImpFile] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const uploadFile = async (dry) => {
+    if (!impFile) return toast.error("Choose a .xlsx or .csv file first");
+    const fd = new FormData(); fd.append("file", impFile);
+    try {
+      const r = await api.post(`/admin/products/import-file?dry_run=${dry}`, fd);
+      if (dry) { setPreview(r.data); }
+      else { toast.success(`Imported ${r.data.created_count} new, ${r.data.updated_count} updated`); setPreview(null); setImpFile(null); load(); }
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const uploadPhotos = async () => {
+    if (!photoFile) return toast.error("Choose a .zip of photos first");
+    const fd = new FormData(); fd.append("file", photoFile);
+    try {
+      const r = await api.post("/admin/products/import-photos", fd);
+      toast.success(`Matched ${r.data.matched_count} photo(s) by SKU`);
+      if (r.data.unmatched?.length) toast.error(`${r.data.unmatched.length} photo(s) had no matching SKU`);
+      setPhotoFile(null); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
   useEffect(() => { load(); api.get("/categories?include_hidden=true").then((r) => setCats(r.data)); }, []);
 
   const save = async () => {
@@ -186,6 +208,28 @@ function Products() {
           <div className="flex gap-3 mt-3">
             <button onClick={importProducts} disabled={!csv.trim()} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold disabled:opacity-50" data-testid="import-products">Import products</button>
             <a href={`${base}/admin/product-template.csv`} className="text-brand-green font-semibold self-center underline">Download the template first</a>
+          </div>
+          <div className="mt-4 border-t border-brand-border pt-4">
+            <label className="font-semibold block mb-1">Or upload a file (.xlsx or .csv) — with a preview before it commits</label>
+            <input type="file" accept=".xlsx,.xlsm,.csv" onChange={(e) => { setImpFile(e.target.files[0]); setPreview(null); }} className="block mb-3" data-testid="products-file" />
+            <div className="flex gap-3 flex-wrap">
+              <button onClick={() => uploadFile(true)} disabled={!impFile} className="border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold disabled:opacity-50" data-testid="preview-import">Preview changes</button>
+              <button onClick={() => uploadFile(false)} disabled={!impFile} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold disabled:opacity-50" data-testid="apply-import">Apply import</button>
+            </div>
+            {preview && (
+              <div className="mt-3 bg-brand-bone rounded-xl p-4" data-testid="import-preview">
+                <p className="font-semibold text-brand-green">Dry-run preview — nothing saved yet:</p>
+                <p className="mt-1">{preview.created_count} new product(s){preview.created.length ? `: ${preview.created.join(", ")}` : ""}</p>
+                <p>{preview.updated_count} existing updated by SKU{preview.updated.length ? `: ${preview.updated.join(", ")}` : ""}</p>
+                {preview.errors?.length > 0 && <p className="text-[#B71C1C] mt-1">{preview.errors.length} row(s) skipped: {preview.errors[0]}</p>}
+                <button onClick={() => uploadFile(false)} className="mt-2 bg-brand-green text-white rounded-full px-5 py-2 font-semibold" data-testid="confirm-import">Looks good — apply now</button>
+              </div>
+            )}
+          </div>
+          <div className="mt-4 border-t border-brand-border pt-4">
+            <label className="font-semibold block mb-1">Bulk photo import — upload a .zip; files are matched to products by SKU (e.g. MOB-003.jpg or MOB-003_2.jpg)</label>
+            <input type="file" accept=".zip" onChange={(e) => setPhotoFile(e.target.files[0])} className="block mb-3" data-testid="photos-file" />
+            <button onClick={uploadPhotos} disabled={!photoFile} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold disabled:opacity-50" data-testid="upload-photos">Upload photos</button>
           </div>
         </Card>
       )}

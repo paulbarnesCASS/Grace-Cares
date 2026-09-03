@@ -3,8 +3,14 @@ sitemap.xml, robots.txt, and 301 redirect manager."""
 import os
 import csv as _csv
 import io as _io
+import hmac
+import zipfile
+import re
+import asyncio
+import base64
+import openpyxl
 import stripe
-from fastapi import APIRouter, HTTPException, Depends, Response, Request
+from fastapi import APIRouter, HTTPException, Depends, Response, Request, UploadFile, File, Header
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from typing import Optional, List
@@ -312,3 +318,152 @@ async def product_import(body: ImportBody, user=Depends(require_admin("shop_admi
                 await notify_admins("new_listing", f"Imported listing '{name}' ({sku}) awaiting approval.", str(res.inserted_id))
     await log_audit(user, "import", "products", after={"created": created, "updated": updated})
     return {"ok": True, "created": created, "updated": updated, "errors": errors}
+
+
+def _product_row(p, cats):
+    return [p.get("name", ""), p.get("sku", ""), cats.get(p.get("category_id"), ""),
+            p.get("description", ""), p.get("condition", ""), p.get("price_ex_vat", 0),
+            p.get("vat_rate", 0.2), p.get("vat_relief_eligible", False),
+            p.get("quantity_available", 0), p.get("weight_kg", 0),
+            p.get("fulfilment_route", "hub_collection"), p.get("stock_model", "unique"),
+            p.get("delivery_charge", 0), p.get("carbon_saving_kg", 0), p.get("dimensions", ""),
+            p.get("max_user_weight", ""), p.get("safety_info", ""), p.get("status", "available"),
+            p.get("featured", False), "|".join(p.get("images", []))]
+
+
+def _rows_from_xlsx(content):
+    wb = openpyxl.load_workbook(_io.BytesIO(content), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [str(h).strip() if h is not None else "" for h in rows[0]]
+    out = []
+    for r in rows[1:]:
+        if all(c is None for c in r):
+            continue
+        out.append({headers[j]: ("" if j >= len(r) or r[j] is None else str(r[j])) for j in range(len(headers))})
+    return out
+
+
+async def _apply_rows(rows, contributor, dry_run):
+    slug_to_id = {c.get("slug"): str(c["_id"]) for c in await db.categories.find().to_list(200)}
+    created, updated, errors = [], [], []
+    for i, row in enumerate(rows, start=2):
+        sku = (row.get("sku") or "").strip()
+        name = (row.get("name") or "").strip()
+        if not sku or not name:
+            errors.append(f"Row {i}: name and sku are required")
+            continue
+        try:
+            fields = {
+                "name": name, "sku": sku,
+                "category_id": slug_to_id.get((row.get("category_slug") or "").strip()),
+                "description": row.get("description", ""), "condition": row.get("condition", "Good"),
+                "price_ex_vat": float(row.get("price_ex_vat") or 0),
+                "vat_rate": float(row.get("vat_rate") or 0.2),
+                "vat_relief_eligible": _b(row.get("vat_relief_eligible")),
+                "quantity_available": int(float(row.get("quantity_available") or 0)),
+                "weight_kg": float(row.get("weight_kg") or 0),
+                "fulfilment_route": (row.get("fulfilment_route") or "hub_collection").strip(),
+                "stock_model": (row.get("stock_model") or "unique").strip(),
+                "delivery_charge": float(row.get("delivery_charge") or 0),
+                "carbon_saving_kg": float(row.get("carbon_saving_kg") or 0),
+                "dimensions": row.get("dimensions", ""), "max_user_weight": row.get("max_user_weight", ""),
+                "safety_info": row.get("safety_info", ""), "featured": _b(row.get("featured")),
+                "images": [u.strip() for u in (row.get("image_urls") or "").split("|") if u.strip()],
+            }
+            status = (row.get("status") or "").strip() or "available"
+            fields["status"] = "draft" if contributor else status
+        except ValueError as e:
+            errors.append(f"Row {i} ({sku}): invalid number — {e}")
+            continue
+        existing = await db.products.find_one({"sku": sku})
+        if existing:
+            updated.append(sku)
+            if not dry_run:
+                await db.products.update_one({"_id": existing["_id"]}, {"$set": fields})
+        else:
+            created.append(sku)
+            if not dry_run:
+                fields.update({"quantity_reserved": 0, "listing_type": "sale", "specifications": {},
+                               "related_ids": [], "fulfilment_options": ["collection", "delivery"],
+                               "created_at": now_utc()})
+                res = await db.products.insert_one(fields)
+                if fields["status"] in ("draft", "awaiting_approval"):
+                    await notify_admins("new_listing", f"Imported listing '{name}' ({sku}) awaiting approval.", str(res.inserted_id))
+    return {"ok": True, "dry_run": dry_run, "created": created, "updated": updated,
+            "errors": errors, "created_count": len(created), "updated_count": len(updated)}
+
+
+@extra_router.post("/admin/products/import-file")
+async def product_import_file(file: UploadFile = File(...), dry_run: bool = False,
+                              user=Depends(require_admin("shop_admin", "product_approver"))):
+    content = await file.read()
+    if file.filename.lower().endswith((".xlsx", ".xlsm")):
+        rows = _rows_from_xlsx(content)
+    else:
+        rows = list(_csv.DictReader(_io.StringIO(content.decode("utf-8-sig"))))
+    r = await _apply_rows(rows, user["role"] == "product_contributor", dry_run)
+    if not dry_run:
+        await log_audit(user, "import_file", "products", after={"created": r["created_count"], "updated": r["updated_count"]})
+    return r
+
+
+@extra_router.post("/admin/products/import-photos")
+async def import_photos(file: UploadFile = File(...), user=Depends(require_admin("shop_admin", "product_approver"))):
+    content = await file.read()
+    matched, unmatched = [], []
+    try:
+        zf = zipfile.ZipFile(_io.BytesIO(content))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "That file is not a valid .zip")
+    with zf:
+        for nm in zf.namelist():
+            base = os.path.basename(nm)
+            if not base or not base.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                continue
+            stem = os.path.splitext(base)[0]
+            prefix = re.split(r"[_\-. ]", stem)[0].strip()
+            prod = await db.products.find_one({"sku": stem}) or await db.products.find_one({"sku": prefix})
+            if not prod:
+                unmatched.append(base)
+                continue
+            ext = os.path.splitext(base)[1].lower().lstrip(".")
+            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+            url = f"data:{mime};base64," + base64.b64encode(zf.read(nm)).decode()
+            imgs = prod.get("images", [])
+            if url not in imgs:
+                imgs = imgs + [url]
+            await db.products.update_one({"_id": prod["_id"]}, {"$set": {"images": imgs}})
+            matched.append(f"{prod['sku']} ← {base}")
+    await log_audit(user, "import_photos", "products", after={"matched": len(matched)})
+    return {"ok": True, "matched": matched, "unmatched": unmatched, "matched_count": len(matched)}
+
+
+async def _run_weekly_export():
+    cats = {str(c["_id"]): c.get("slug", "") for c in await db.categories.find().to_list(200)}
+    prods = await db.products.find().to_list(5000)
+    out = _io.StringIO(); w = _csv.writer(out); w.writerow(PRODUCT_COLUMNS)
+    for p in prods:
+        w.writerow(_product_row(p, cats))
+    csv_text = out.getvalue()
+    total = len(prods)
+    in_stock = sum(1 for p in prods if (p.get("quantity_available", 0) - p.get("quantity_reserved", 0)) > 0)
+    low = [p.get("sku") for p in prods if (p.get("quantity_available", 0) - p.get("quantity_reserved", 0)) <= 1 and p.get("status") != "sold"]
+    recipients = [u["email"] for u in await db.users.find({"role": {"$in": ["shop_admin", "finance_admin", "super_admin", "readonly"]}}).to_list(50)]
+    await db.export_runs.insert_one({"at": now_utc(), "total": total, "in_stock": in_stock,
+                                     "low_stock_count": len(low), "recipients": recipients, "csv_bytes": len(csv_text)})
+    for r in recipients:  # MOCKED email — wire to provider later
+        print(f"[MOCK EMAIL] Weekly product export to {r}: {total} products, {in_stock} in stock, {len(low)} low-stock. CSV attached ({len(csv_text)} bytes).")
+
+
+@extra_router.post("/cron/weekly-product-export")
+async def cron_weekly_export(authorization: str = Header(default="")):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    token = authorization[7:] if authorization.startswith("Bearer ") else ""
+    if not secret or not hmac.compare_digest(token, secret):
+        raise HTTPException(401, "Unauthorized")
+    asyncio.create_task(_run_weekly_export())
+    return {"ok": True, "accepted": True}
