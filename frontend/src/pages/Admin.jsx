@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, Package, ShoppingCart, ShieldCheck, HandHeart, Calendar,
   RefreshCw, Users, MessageSquare, FileText, LogOut, Plus, Leaf, AlertTriangle, Download,
-  Link2, ClipboardList, CheckCircle2,
+  Link2, ClipboardList, CheckCircle2, Truck, Bell,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -17,6 +17,7 @@ const SECTIONS = [
   ["equipment", "Equipment Donations", HandHeart],
   ["events", "Events & Bookings", Calendar],
   ["guided", "Guided Listing", ClipboardList],
+  ["postage", "Postage & Shipping", Truck],
   ["xero", "Xero Sync", RefreshCw],
   ["enquiries", "Enquiries", MessageSquare],
   ["donations", "Financial Donations", HandHeart],
@@ -65,6 +66,7 @@ export default function Admin() {
         {section === "enquiries" && <Enquiries />}
         {section === "donations" && <Donations />}
         {section === "guided" && <GuidedListing />}
+        {section === "postage" && <Postage />}
         {section === "redirects" && <Redirects />}
         {section === "users" && <UsersAdmin />}
       </main>
@@ -77,7 +79,11 @@ const Card = ({ children, className = "" }) => <div className={`bg-white rounded
 
 function Dashboard() {
   const [s, setS] = useState(null);
-  useEffect(() => { api.get("/admin/reports/summary").then((r) => setS(r.data)).catch(() => {}); }, []);
+  const [notes, setNotes] = useState([]);
+  useEffect(() => {
+    api.get("/admin/reports/summary").then((r) => setS(r.data)).catch(() => {});
+    api.get("/admin/notifications").then((r) => setNotes(r.data.filter((n) => !n.read))).catch(() => {});
+  }, []);
   if (!s) return <div>Loading…</div>;
   const stats = [
     ["Total sales (inc VAT)", gbp(s.total_sales_inc_vat)], ["Sales ex VAT", gbp(s.total_sales_ex_vat)],
@@ -89,6 +95,12 @@ function Dashboard() {
   ];
   return (
     <div data-testid="admin-dashboard">
+      {notes.length > 0 && (
+        <div className="bg-brand-lime/30 border border-brand-lime rounded-xl p-4 mb-6 flex items-start gap-2" data-testid="notifications-banner">
+          <Bell size={20} className="text-brand-green shrink-0 mt-0.5" />
+          <div><strong className="text-brand-green">{notes.length} notification{notes.length > 1 ? "s" : ""}:</strong> <span className="text-[#2D2D30]">{notes.slice(0, 3).map((n) => n.message).join(" · ")}</span></div>
+        </div>
+      )}
       <div className="flex justify-between items-center mb-6">
         <H>Dashboard</H>
         <a href={`${api.defaults.baseURL}/admin/reports/orders.csv`} className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-5 py-2.5 font-semibold"><Download size={18} /> Export orders CSV</a>
@@ -114,6 +126,7 @@ const EMPTY_PRODUCT = {
   vat_relief_eligible: false, quantity_available: 1, images: [], category_id: "",
   dimensions: "", max_user_weight: "", carbon_saving_kg: 0, delivery_charge: 25,
   fulfilment_options: ["collection", "delivery"], listing_type: "sale", status: "available",
+  weight_kg: 3, fulfilment_route: "hub_collection",
   safety_info: "", admin_notes: "", featured: false, seo_title: "", seo_description: "",
   specifications: {}, related_ids: [], subcategory_id: null,
 };
@@ -135,7 +148,7 @@ function Products() {
   useEffect(() => { load(); api.get("/categories?include_hidden=true").then((r) => setCats(r.data)); }, []);
 
   const save = async () => {
-    const body = { ...edit, price_ex_vat: Number(edit.price_ex_vat), quantity_available: Number(edit.quantity_available), carbon_saving_kg: Number(edit.carbon_saving_kg) || 0, delivery_charge: Number(edit.delivery_charge) || 0, vat_rate: Number(edit.vat_rate) || 0.2, images: typeof edit.images === "string" ? edit.images.split(",").map((s) => s.trim()).filter(Boolean) : edit.images };
+    const body = { ...edit, price_ex_vat: Number(edit.price_ex_vat), quantity_available: Number(edit.quantity_available), carbon_saving_kg: Number(edit.carbon_saving_kg) || 0, delivery_charge: Number(edit.delivery_charge) || 0, weight_kg: Number(edit.weight_kg) || 0, vat_rate: Number(edit.vat_rate) || 0.2, images: typeof edit.images === "string" ? edit.images.split(",").map((s) => s.trim()).filter(Boolean) : edit.images };
     try {
       if (edit.id) await api.put(`/products/${edit.id}`, body); else await api.post("/products", body);
       toast.success("Product saved"); setEdit(null); load();
@@ -175,6 +188,8 @@ function Products() {
               <div><label className="font-semibold">Status</label><select className={`${input} bg-white`} value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option>available</option><option>reserved</option><option>sold</option><option>hidden</option></select></div>
               <div><label className="font-semibold">Delivery charge (£)</label><input type="number" step="0.01" className={input} value={edit.delivery_charge} onChange={(e) => setEdit({ ...edit, delivery_charge: e.target.value })} /></div>
               <div><label className="font-semibold">Carbon saving (kg)</label><input type="number" step="0.1" className={input} value={edit.carbon_saving_kg} onChange={(e) => setEdit({ ...edit, carbon_saving_kg: e.target.value })} /></div>
+              <div><label className="font-semibold">Weight (kg) — for postage</label><input type="number" step="0.1" className={input} value={edit.weight_kg} onChange={(e) => setEdit({ ...edit, weight_kg: e.target.value })} data-testid="pm-weight" /></div>
+              <div><label className="font-semibold">Fulfilment route</label><select className={`${input} bg-white`} value={edit.fulfilment_route} onChange={(e) => setEdit({ ...edit, fulfilment_route: e.target.value })} data-testid="pm-route"><option value="postable">Postable</option><option value="hub_collection">Hub collection</option><option value="bulky_delivery">Bulky delivery</option></select></div>
               <div className="sm:col-span-2"><label className="font-semibold">Image URLs (comma separated)</label><input className={input} value={edit.images} onChange={(e) => setEdit({ ...edit, images: e.target.value })} data-testid="pm-images" /></div>
               <div className="sm:col-span-2"><label className="font-semibold">Description</label><textarea rows={3} className={input} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></div>
               <div><label className="font-semibold">Dimensions</label><input className={input} value={edit.dimensions} onChange={(e) => setEdit({ ...edit, dimensions: e.target.value })} /></div>
@@ -196,6 +211,14 @@ function Orders() {
   const [orders, setOrders] = useState([]);
   const load = () => api.get("/admin/orders").then((r) => setOrders(r.data));
   useEffect(() => { load(); }, []);
+  const quote = async (o) => {
+    const a = window.prompt(`Delivery quote (£) for bulky order ${o.reference}:`);
+    if (!a) return;
+    const r = await api.post(`/admin/orders/${o.id}/delivery-quote`, { amount: Number(a) });
+    toast.success("Delivery quote created — share the payment link with the customer");
+    window.open(r.data.checkout_url, "_blank");
+    load();
+  };
   const refund = async (o) => {
     const amtStr = window.prompt(`Refund amount for ${o.reference} (leave blank for full refund of ${o.totals.total_payable}):`);
     if (amtStr === null) return;
@@ -212,7 +235,12 @@ function Orders() {
             <tr key={o.id} className={i % 2 ? "bg-brand-bone" : ""} data-testid={`order-row-${o.reference}`}>
               <td className="p-3 font-semibold">{o.reference}</td><td className="p-3">{o.customer?.name}</td><td className="p-3">{gbp(o.totals?.total_payable)}</td>
               <td className="p-3">{o.status}</td><td className="p-3">{o.xero_sync_status}</td>
-              <td className="p-3">{o.payment_status === "paid" && o.status !== "refunded" && <button onClick={() => refund(o)} className="text-brand-terracotta font-semibold" data-testid={`refund-${o.reference}`}>Refund</button>}</td>
+              <td className="p-3 whitespace-nowrap">
+                {o.payment_status === "paid" && o.status !== "refunded" && <button onClick={() => refund(o)} className="text-brand-terracotta font-semibold mr-3" data-testid={`refund-${o.reference}`}>Refund</button>}
+                {o.fulfilment === "bulky_delivery" && (o.delivery_quote?.status === "paid"
+                  ? <span className="text-[#1B5E20] font-semibold">Delivery paid</span>
+                  : <button onClick={() => quote(o)} className="text-brand-green font-semibold" data-testid={`quote-${o.reference}`}>{o.delivery_quote ? "Re-quote delivery" : "Set delivery quote"}</button>)}
+              </td>
             </tr>
           ))}</tbody>
         </table>
@@ -465,6 +493,8 @@ function Redirects() {
   useEffect(() => { load(); }, []);
   const add = async (e) => { e.preventDefault(); await api.post("/admin/redirects", f); toast.success("Redirect saved"); setF({ from_path: "", to_path: "", status_code: 301 }); load(); };
   const del = async (id) => { await api.delete(`/admin/redirects/${id}`); load(); };
+  const [csv, setCsv] = useState("");
+  const importCsv = async () => { const r = await api.post("/admin/redirects/import", { csv }); toast.success(`Imported ${r.data.imported} redirects`); setCsv(""); load(); };
   const base = api.defaults.baseURL;
   const input = "w-full rounded-lg border border-[#8C8C8C] px-3 py-2";
   return (
@@ -484,9 +514,44 @@ function Redirects() {
           <button className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="redirect-add">Add redirect</button>
         </form>
       </Card>
+      <Card className="mb-6">
+        <label className="font-semibold block mb-1">Bulk import (CSV: old_path,new_path[,code] — one per line)</label>
+        <textarea rows={4} className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2 font-mono text-sm" placeholder="/old-shop/wheelchairs,/shop?category_id=...\n/news/2019/story,/news/story" value={csv} onChange={(e) => setCsv(e.target.value)} data-testid="redirect-csv" />
+        <button onClick={importCsv} disabled={!csv.trim()} className="mt-3 bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold disabled:opacity-50" data-testid="redirect-import">Import CSV</button>
+      </Card>
       <Card className="overflow-x-auto p-0"><table className="w-full text-left"><thead className="bg-brand-bone"><tr><th className="p-3">From</th><th className="p-3">To</th><th className="p-3">Code</th><th className="p-3"></th></tr></thead>
         <tbody>{items.map((r, i) => <tr key={r.id} className={i % 2 ? "bg-brand-bone" : ""}><td className="p-3">{r.from_path}</td><td className="p-3">{r.to_path}</td><td className="p-3">{r.status_code}</td><td className="p-3"><button onClick={() => del(r.id)} className="text-brand-terracotta font-semibold">Delete</button></td></tr>)}
         {items.length === 0 && <tr><td className="p-3 text-[#4A4A4D]" colSpan={4}>No redirects yet.</td></tr>}</tbody></table></Card>
+    </div>
+  );
+}
+
+function Postage() {
+  const [bands, setBands] = useState([]);
+  useEffect(() => { api.get("/admin/postage-bands").then((r) => setBands(r.data.bands)); }, []);
+  const upd = (i, k, v) => setBands(bands.map((b, j) => j === i ? { ...b, [k]: Number(v) } : b));
+  const addB = () => setBands([...bands, { max_kg: 0, price: 0 }]);
+  const rm = (i) => setBands(bands.filter((_, j) => j !== i));
+  const save = async () => { await api.put("/admin/postage-bands", { bands }); toast.success("Postage bands saved"); };
+  const inp = "w-28 rounded-lg border border-[#8C8C8C] px-3 py-2";
+  return (
+    <div data-testid="admin-postage">
+      <H>Postage & shipping bands</H>
+      <Card className="max-w-xl">
+        <p className="text-[#4A4A4D] mb-4">Postable orders are charged by total item weight (set each product's weight on its edit form). VAT is added at 20%.</p>
+        {bands.map((b, i) => (
+          <div key={i} className="flex items-center gap-2 mb-2 flex-wrap">
+            <span>Up to</span>
+            <input type="number" className={inp} value={b.max_kg} onChange={(e) => upd(i, "max_kg", e.target.value)} data-testid={`band-kg-${i}`} /><span>kg →</span>
+            <span>£</span><input type="number" step="0.01" className={inp} value={b.price} onChange={(e) => upd(i, "price", e.target.value)} data-testid={`band-price-${i}`} />
+            <button onClick={() => rm(i)} className="text-brand-terracotta font-semibold">Remove</button>
+          </div>
+        ))}
+        <div className="flex gap-3 mt-4">
+          <button onClick={addB} className="border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold">Add band</button>
+          <button onClick={save} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="save-bands">Save bands</button>
+        </div>
+      </Card>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 shows a 'REAL PHOTO TO REPLACE' placeholder (no stock photos of people, per v3)."""
 from core import db, now_utc
 
-SEED_VERSION = "v3-3"
+SEED_VERSION = "v3-4"
 
 # v3 data-model category set (confirmed by client)
 CATEGORIES = [
@@ -31,6 +31,7 @@ def _p(name, sku, cat, desc, grade, price, relief, qty, model="unique", **extra)
          "stock_model": model, "listing_type": "sale", "status": "available",
          "fulfilment_options": ["collection", "delivery"], "delivery_charge": 25.0,
          "fulfilment_route": extra.pop("fulfilment_route", "hub_collection"),
+         "weight_kg": extra.pop("weight_kg", 3.0),
          "specifications": {}, "featured": False}
     d.update(extra)
     return d
@@ -39,7 +40,7 @@ def _p(name, sku, cat, desc, grade, price, relief, qty, model="unique", **extra)
 PRODUCTS = [
     _p("Self-Propel Folding Wheelchair", "MOB-001", "mobility", "Lightweight self-propel folding wheelchair, fully serviced and cleaned.", G_VERY_GOOD, 145.0, True, 1, "unique", max_user_weight="115 kg", dimensions="94 x 66 x 91 cm", carbon_saving_kg=42.0, featured=True, safety_info="Brakes tested and fully functional. Please check the user weight limit before use."),
     _p("Attendant Transit Wheelchair", "MOB-002", "mobility", "Compact attendant-controlled transit wheelchair — a repeat-stock item.", G_GOOD, 89.0, True, 4, "repeat", max_user_weight="100 kg", carbon_saving_kg=38.0),
-    _p("Aluminium Walking Frame", "MOB-003", "mobility", "Lightweight walking frame, cleaned and checked, non-slip ferrules fitted.", G_GOOD, 22.0, True, 6, "repeat", carbon_saving_kg=6.0, fulfilment_route="postable"),
+    _p("Aluminium Walking Frame", "MOB-003", "mobility", "Lightweight walking frame, cleaned and checked, non-slip ferrules fitted.", G_GOOD, 22.0, True, 6, "repeat", carbon_saving_kg=6.0, fulfilment_route="postable", weight_kg=2.5),
     _p("Four-Wheel Rollator with Seat", "MOB-004", "mobility", "Height-adjustable rollator with padded seat and bag.", G_VERY_GOOD, 55.0, True, 3, "repeat", max_user_weight="135 kg", carbon_saving_kg=12.0, featured=True),
     _p("Electric Profiling Care Bed", "BED-001", "beds", "Fully adjustable electric profiling bed with remote. PAT tested.", G_VERY_GOOD, 380.0, True, 1, "unique", dimensions="200 x 90 cm", max_user_weight="180 kg", carbon_saving_kg=120.0, delivery_charge=60.0, featured=True, fulfilment_route="bulky_delivery", safety_info="Electrically tested (PAT). Professional delivery and set-up recommended."),
     _p("Pressure-Relieving Mattress", "BED-002", "beds", "Cleaned pressure-relieving foam mattress in excellent condition.", G_EXCELLENT, 95.0, True, 1, "unique", dimensions="200 x 90 x 15 cm", carbon_saving_kg=30.0),

@@ -1,6 +1,7 @@
 """v3 extras: product approve/draft workflow, fulfilment info, Grace AI stub,
 sitemap.xml, robots.txt, and 301 redirect manager."""
 import os
+import stripe
 from fastapi import APIRouter, HTTPException, Depends, Response, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
@@ -9,7 +10,7 @@ from bson import ObjectId
 
 from core import db, now_utc, clean, cleans
 from auth import require_admin
-from shop import log_audit
+from shop import log_audit, DEFAULT_BANDS, notify_admins
 
 extra_router = APIRouter(prefix="/api")
 SITE = os.environ.get("FRONTEND_URL", "https://grace-cares.com").rstrip("/")
@@ -121,3 +122,86 @@ async def sitemap():
 @extra_router.get("/robots.txt", response_class=PlainTextResponse)
 async def robots():
     return f"User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /account\nSitemap: {SITE}/api/sitemap.xml\n"
+
+
+class PostageBands(BaseModel):
+    bands: List[dict]
+
+
+@extra_router.get("/admin/postage-bands")
+async def get_bands(user=Depends(require_admin("shop_admin", "finance_admin"))):
+    s = await db.site_settings.find_one({"key": "postage_bands"})
+    return {"bands": (s or {}).get("bands", DEFAULT_BANDS)}
+
+
+@extra_router.put("/admin/postage-bands")
+async def set_bands(body: PostageBands, user=Depends(require_admin("shop_admin", "finance_admin"))):
+    await db.site_settings.update_one({"key": "postage_bands"},
+        {"$set": {"key": "postage_bands", "bands": body.bands}}, upsert=True)
+    await log_audit(user, "update", "postage_bands", after={"bands": body.bands})
+    return {"ok": True}
+
+
+@extra_router.get("/admin/notifications")
+async def notifications(user=Depends(require_admin("shop_admin", "product_approver"))):
+    return cleans(await db.notifications.find().sort("at", -1).to_list(100))
+
+
+@extra_router.post("/admin/notifications/{nid}/read")
+async def mark_read(nid: str, user=Depends(require_admin("shop_admin", "product_approver"))):
+    await db.notifications.update_one({"_id": ObjectId(nid)}, {"$set": {"read": True}})
+    return {"ok": True}
+
+
+class QuoteBody(BaseModel):
+    amount: float
+    note: Optional[str] = ""
+
+
+@extra_router.post("/admin/orders/{oid}/delivery-quote")
+async def delivery_quote(oid: str, body: QuoteBody, user=Depends(require_admin("shop_admin", "finance_admin"))):
+    o = await db.orders.find_one({"_id": ObjectId(oid)})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    origin = os.environ.get("FRONTEND_URL", SITE)
+    session = stripe.checkout.Session.create(
+        line_items=[{"price_data": {"currency": "gbp",
+                     "product_data": {"name": f"Delivery for order {o['reference']}"},
+                     "unit_amount": int(round(body.amount * 100))}, "quantity": 1}],
+        mode="payment",
+        success_url=f"{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{origin}/",
+        metadata={"order_id": oid, "type": "delivery_quote"})
+    await db.payment_transactions.insert_one({
+        "session_id": session.id, "order_id": oid, "order_ref": o["reference"],
+        "amount": body.amount, "currency": "gbp", "type": "delivery_quote",
+        "status": "initiated", "payment_status": "pending",
+        "created_at": now_utc(), "updated_at": now_utc()})
+    await db.orders.update_one({"_id": ObjectId(oid)}, {"$set": {"delivery_quote": {
+        "amount": body.amount, "note": body.note, "checkout_url": session.url,
+        "status": "awaiting_payment", "by": user["email"], "at": now_utc()}}})
+    await log_audit(user, "delivery_quote", "order", oid, after={"amount": body.amount})
+    return {"ok": True, "checkout_url": session.url}
+
+
+class ImportBody(BaseModel):
+    csv: str
+
+
+@extra_router.post("/admin/redirects/import")
+async def import_redirects(body: ImportBody, user=Depends(require_admin("content_admin"))):
+    import csv as csvmod, io
+    reader = csvmod.reader(io.StringIO(body.csv))
+    count = 0
+    for row in reader:
+        if len(row) < 2:
+            continue
+        frm, to = row[0].strip(), row[1].strip()
+        if not frm or not to or frm.lower() in ("from", "from_path"):
+            continue
+        code = int(row[2]) if len(row) > 2 and row[2].strip().isdigit() else 301
+        await db.redirects.update_one({"from_path": frm},
+            {"$set": {"from_path": frm, "to_path": to, "status_code": code}}, upsert=True)
+        count += 1
+    await log_audit(user, "import", "redirects", after={"imported": count})
+    return {"ok": True, "imported": count}

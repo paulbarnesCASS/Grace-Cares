@@ -65,6 +65,12 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - Built: **3 fulfilment routes** (postable / Lichfield hub collection / bulky delivery with an access questionnaire captured on the order); **draft→approve** workflow (product_contributor drafts, product_approver/shop_admin publish; drafts hidden from public shop + sitemap); **guided one-question-at-a-time listing form** with localStorage autosave (saves as draft for approval); **Grace AI** stub assistant (rule-based, refuses clinical/suitability + VAT-eligibility questions and offers a human with call button); **sitemap.xml + robots.txt** (backend) + **301 redirect manager** (admin CRUD + automatic resolution on 404 via NotFound page).
 - Verified via API: draft hidden from public list, products-review lists drafts, redirect resolve works, Grace AI refuses with handoff.
 
+## v3 round 3 (this session)
+- **Postage bands**: products have `weight_kg`; postable orders are charged by total weight against editable bands (Admin → Postage & Shipping). Verified: 2.5 kg → £7.95 (+VAT).
+- **Approval notifications**: creating a draft/awaiting listing writes an in-app notification + a **MOCKED** email log to approvers; Dashboard shows a notifications banner. (Real email = wire provider later.)
+- **Bulky delivery quotes**: Admin → Orders "Set delivery quote" on bulky orders creates a Stripe payment link; paying it marks `delivery_quote.status=paid` (webhook + status handled).
+- **Redirect CSV import**: Admin → Redirects & SEO bulk-imports `old,new[,code]` CSV (upsert). Verified: imported 2.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

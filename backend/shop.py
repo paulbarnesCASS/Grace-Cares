@@ -48,6 +48,34 @@ async def release_expired_reservations():
         await db.orders.update_one({"_id": o["_id"]}, {"$set": {"status": "expired"}})
 
 
+DEFAULT_BANDS = [{"max_kg": 2, "price": 4.95}, {"max_kg": 5, "price": 7.95},
+                 {"max_kg": 10, "price": 11.95}, {"max_kg": 20, "price": 16.95},
+                 {"max_kg": 9999, "price": 24.95}]
+
+
+async def get_postage(weight: float) -> float:
+    s = await db.site_settings.find_one({"key": "postage_bands"})
+    bands = (s or {}).get("bands", DEFAULT_BANDS)
+    for b in sorted(bands, key=lambda x: x["max_kg"]):
+        if weight <= b["max_kg"]:
+            return round(b["price"], 2)
+    return round(bands[-1]["price"], 2) if bands else 0.0
+
+
+async def notify_admins(kind: str, message: str, entity_id: str = None):
+    await db.notifications.insert_one({"kind": kind, "message": message,
+                                       "entity_id": entity_id, "read": False, "at": now_utc()})
+    approvers = await db.users.find({"role": {"$in": ["product_approver", "shop_admin", "super_admin"]}}).to_list(50)
+    for a in approvers:
+        print(f"[MOCK EMAIL] To {a['email']}: {message}")  # MOCKED — wire to email provider later
+
+
+async def finalize_delivery_quote(order_id: str, pi: str = None):
+    await db.orders.update_one({"_id": ObjectId(order_id)},
+        {"$set": {"delivery_quote.status": "paid", "delivery_quote.paid_at": now_utc(),
+                  "delivery_quote.payment_intent": pi}})
+
+
 # ---------------- Categories ----------------
 class CategoryBody(BaseModel):
     name: str
@@ -110,6 +138,7 @@ class ProductBody(BaseModel):
     delivery_charge: float = 0
     listing_type: str = "sale"  # sale or hire
     stock_model: str = "unique"  # unique or repeat
+    weight_kg: float = 0
     fulfilment_route: str = "hub_collection"  # postable, hub_collection, bulky_delivery
     status: str = "available"  # available, reserved, sold, hidden
     related_ids: List[str] = []
@@ -220,6 +249,8 @@ async def create_product(body: ProductBody, user=Depends(require_admin("shop_adm
     res = await db.products.insert_one(doc)
     await record_stock_movement(str(res.inserted_id), body.quantity_available, "initial_stock")
     await log_audit(user, "create", "product", str(res.inserted_id), after={"name": body.name, "sku": body.sku})
+    if doc.get("status") in ("draft", "awaiting_approval"):
+        await notify_admins("new_listing", f"New listing '{body.name}' ({body.sku}) is awaiting approval.", str(res.inserted_id))
     return clean(await db.products.find_one({"_id": res.inserted_id}))
 
 
@@ -337,19 +368,26 @@ async def compute_order(body: CheckoutBody):
 
     delivery_ex = 0.0
     delivery_vat = 0.0
-    if body.fulfilment in ("delivery", "postable"):
-        # order-level delivery = max product delivery_charge (standard-rated)
+    if body.fulfilment == "postable":
+        total_w = 0.0
+        for it in body.items:
+            p = await db.products.find_one({"_id": ObjectId(it.product_id)})
+            total_w += (p.get("weight_kg", 0) or 0) * it.quantity
+        delivery_ex = await get_postage(total_w)
+        delivery_vat = round(delivery_ex * STANDARD_VAT, 2)
+    elif body.fulfilment == "delivery":
         charges = []
         for it in body.items:
             p = await db.products.find_one({"_id": ObjectId(it.product_id)})
             charges.append(p.get("delivery_charge", 0) or 0)
         delivery_ex = round(max(charges) if charges else 0, 2)
         delivery_vat = round(delivery_ex * STANDARD_VAT, 2)
-        if delivery_ex:
-            key = "20%"
-            vat_breakdown.setdefault(key, {"ex": 0, "vat": 0})
-            vat_breakdown[key]["ex"] = round(vat_breakdown[key]["ex"] + delivery_ex, 2)
-            vat_breakdown[key]["vat"] = round(vat_breakdown[key]["vat"] + delivery_vat, 2)
+    # hub_collection / bulky_delivery -> £0 now (bulky quoted separately later)
+    if delivery_ex:
+        key = "20%"
+        vat_breakdown.setdefault(key, {"ex": 0, "vat": 0})
+        vat_breakdown[key]["ex"] = round(vat_breakdown[key]["ex"] + delivery_ex, 2)
+        vat_breakdown[key]["vat"] = round(vat_breakdown[key]["vat"] + delivery_vat, 2)
 
     donation = round(max(0, body.donation_amount), 2)
     total = round(subtotal_ex + vat_total + delivery_ex + delivery_vat + donation, 2)
@@ -479,6 +517,8 @@ async def payment_status(session_id: str):
                     await finalize_donation(rec["donation_id"], s.payment_intent)
                 elif rec.get("type") == "event" and rec.get("booking_id"):
                     await finalize_event_booking(rec["booking_id"], s.payment_intent)
+                elif rec.get("type") == "delivery_quote" and rec.get("order_id"):
+                    await finalize_delivery_quote(rec["order_id"], s.payment_intent)
                 rec = await db.payment_transactions.find_one({"session_id": session_id})
         except Exception:
             pass
@@ -510,6 +550,8 @@ async def stripe_webhook(request: Request):
                 await finalize_donation(rec["donation_id"], obj.get("payment_intent"))
             elif rec.get("type") == "event" and rec.get("booking_id"):
                 await finalize_event_booking(rec["booking_id"], obj.get("payment_intent"))
+            elif rec.get("type") == "delivery_quote" and rec.get("order_id"):
+                await finalize_delivery_quote(rec["order_id"], obj.get("payment_intent"))
     elif t == "charge.refunded":
         pi = obj.get("payment_intent")
         await db.payment_transactions.update_one({"stripe_payment_intent_id": pi},
