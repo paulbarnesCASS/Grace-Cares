@@ -330,8 +330,11 @@ function Products() {
   );
 }
 
+const ORDER_STATUSES = ["pending_payment", "paid", "processing", "ready_for_collection", "dispatched", "completed", "cancelled", "refunded", "partially_refunded", "expired"];
+
 function Orders() {
   const [orders, setOrders] = useState([]);
+  const [selected, setSelected] = useState(null);
   const load = () => api.get("/admin/orders").then((r) => setOrders(r.data));
   useEffect(() => { load(); }, []);
   const quote = async (o) => {
@@ -346,19 +349,29 @@ function Orders() {
     const amtStr = window.prompt(`Refund amount for ${o.reference} (leave blank for full refund of ${o.totals.total_payable}):`);
     if (amtStr === null) return;
     const body = { amount: amtStr ? Number(amtStr) : null, return_stock: true };
-    try { await api.post(`/admin/orders/${o.id}/refund`, body); toast.success("Refund processed"); load(); }
+    try { await api.post(`/admin/orders/${o.id}/refund`, body); toast.success("Refund processed"); load(); setSelected(null); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
+  const setStatus = async (o, status) => {
+    try {
+      await api.put(`/admin/orders/${o.id}/status`, { status });
+      toast.success(`Order marked ${status.replace(/_/g, " ")}`);
+      setSelected({ ...o, status });
+      load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const dt = (v) => v ? new Date(v).toLocaleString("en-GB") : "—";
   return (
     <div data-testid="admin-orders">
       <H>Orders</H>
       <Card className="overflow-x-auto p-0">
         <table className="w-full text-left"><thead className="bg-brand-bone"><tr><th className="p-3">Ref</th><th className="p-3">Customer</th><th className="p-3">Total</th><th className="p-3">Status</th><th className="p-3">Xero</th><th className="p-3"></th></tr></thead>
           <tbody>{orders.map((o, i) => (
-            <tr key={o.id} className={i % 2 ? "bg-brand-bone" : ""} data-testid={`order-row-${o.reference}`}>
-              <td className="p-3 font-semibold">{o.reference}</td><td className="p-3">{o.customer?.name}</td><td className="p-3">{gbp(o.totals?.total_payable)}</td>
+            <tr key={o.id} className={`${i % 2 ? "bg-brand-bone" : ""} cursor-pointer hover:bg-brand-lime/20`} onClick={() => setSelected(o)} data-testid={`order-row-${o.reference}`}>
+              <td className="p-3 font-semibold text-brand-green underline">{o.reference}</td><td className="p-3">{o.customer?.name}</td><td className="p-3">{gbp(o.totals?.total_payable)}</td>
               <td className="p-3">{o.status}</td><td className="p-3">{o.xero_sync_status}</td>
-              <td className="p-3 whitespace-nowrap">
+              <td className="p-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => setSelected(o)} className="text-brand-green font-semibold mr-3" data-testid={`view-${o.reference}`}>View</button>
                 {o.payment_status === "paid" && o.status !== "refunded" && <button onClick={() => refund(o)} className="text-brand-terracotta font-semibold mr-3" data-testid={`refund-${o.reference}`}>Refund</button>}
                 {o.fulfilment === "bulky_delivery" && (o.delivery_quote?.status === "paid"
                   ? <span className="text-[#1B5E20] font-semibold">Delivery paid</span>
@@ -368,6 +381,94 @@ function Orders() {
           ))}</tbody>
         </table>
       </Card>
+
+      {selected && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-auto" onClick={() => setSelected(null)}>
+          <div className="bg-white rounded-2xl p-7 max-w-3xl w-full my-8 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()} data-testid="order-detail-modal">
+            <div className="flex justify-between items-start mb-4 flex-wrap gap-3">
+              <div>
+                <h2 className="font-heading text-2xl font-bold text-brand-green">Order {selected.reference}</h2>
+                <p className="text-[#4A4A4D] text-sm">Placed {dt(selected.created_at)}{selected.paid_at ? ` · Paid ${dt(selected.paid_at)}` : ""}</p>
+              </div>
+              <button onClick={() => setSelected(null)} className="text-2xl leading-none text-[#4A4A4D] px-2" data-testid="order-close">×</button>
+            </div>
+
+            <div className="grid sm:grid-cols-3 gap-3 mb-5">
+              {[["Status", selected.status], ["Payment", selected.payment_status], ["Xero", selected.xero_sync_status]].map(([l, v]) => (
+                <div key={l} className="bg-brand-bone rounded-xl p-3"><div className="text-xs font-semibold text-[#4A4A4D] uppercase">{l}</div><div className="font-bold text-brand-green">{v || "—"}</div></div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 mb-6 flex-wrap">
+              <label className="font-semibold text-sm">Update status:</label>
+              <select className="rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" value={selected.status} onChange={(e) => setStatus(selected, e.target.value)} data-testid="order-status-select">
+                {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
+              </select>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-5 mb-6">
+              <div>
+                <h3 className="font-bold text-brand-green mb-1">Customer</h3>
+                <p className="text-[#2D2D30]">{selected.customer?.name}</p>
+                <p className="text-[#4A4A4D] text-sm">{selected.customer?.email}</p>
+                <p className="text-[#4A4A4D] text-sm">{selected.customer?.phone || "No phone"}</p>
+                <p className="text-[#4A4A4D] text-sm mt-1">{[selected.customer?.address_line1, selected.customer?.address_line2, selected.customer?.city, selected.customer?.postcode].filter(Boolean).join(", ") || "No address"}</p>
+              </div>
+              <div>
+                <h3 className="font-bold text-brand-green mb-1">Fulfilment</h3>
+                <p className="text-[#2D2D30] capitalize">{(selected.fulfilment || "—").replace(/_/g, " ")}</p>
+                {selected.delivery_questionnaire && (
+                  <div className="text-[#4A4A4D] text-sm mt-1">
+                    {Object.entries(selected.delivery_questionnaire).map(([k, v]) => v ? <div key={k}><span className="capitalize">{k.replace(/_/g, " ")}</span>: {String(v)}</div> : null)}
+                  </div>
+                )}
+                {selected.vat_relief_claim && <p className="text-[#1B5E20] font-semibold text-sm mt-2">✓ VAT relief claimed (see VAT Declarations)</p>}
+                {selected.marketing_consent && <p className="text-[#4A4A4D] text-sm">Opted in to marketing</p>}
+              </div>
+            </div>
+
+            <h3 className="font-bold text-brand-green mb-2">Items</h3>
+            <div className="overflow-x-auto border border-brand-border rounded-xl mb-4">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-brand-bone"><tr><th className="p-2">Item</th><th className="p-2">SKU</th><th className="p-2">Qty</th><th className="p-2">Ex VAT</th><th className="p-2">VAT</th><th className="p-2">Total</th></tr></thead>
+                <tbody>{(selected.items || []).map((it, idx) => (
+                  <tr key={idx} className={idx % 2 ? "bg-brand-bone" : ""}>
+                    <td className="p-2">{it.name}{it.vat_relief_applied ? <span className="text-[#1B5E20] font-semibold"> · relief</span> : ""}</td>
+                    <td className="p-2">{it.sku}</td><td className="p-2">{it.quantity}</td>
+                    <td className="p-2">{gbp(it.line_ex_vat)}</td><td className="p-2">{gbp(it.line_vat)}</td><td className="p-2">{gbp(it.line_total)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+
+            <div className="bg-brand-bone rounded-xl p-4 mb-4 max-w-sm ml-auto text-sm">
+              {[["Subtotal (ex VAT)", selected.totals?.subtotal_ex_vat], ["VAT", selected.totals?.vat_total], ["Delivery", selected.totals?.delivery_total], ["Donation", selected.totals?.donation]].map(([l, v]) => (
+                <div key={l} className="flex justify-between py-0.5"><span className="text-[#4A4A4D]">{l}</span><span>{gbp(v)}</span></div>
+              ))}
+              <div className="flex justify-between border-t border-brand-green mt-1 pt-1 font-bold text-brand-green"><span>Total paid</span><span>{gbp(selected.totals?.total_payable)}</span></div>
+            </div>
+
+            {selected.delivery_quote && (
+              <div className="border border-brand-border rounded-xl p-4 mb-4">
+                <h3 className="font-bold text-brand-green mb-1">Delivery quote</h3>
+                <p className="text-sm">{gbp(selected.delivery_quote.amount)} · {selected.delivery_quote.status} {selected.delivery_quote.note ? `· ${selected.delivery_quote.note}` : ""}</p>
+              </div>
+            )}
+            {selected.refunds?.length > 0 && (
+              <div className="border border-brand-border rounded-xl p-4 mb-4">
+                <h3 className="font-bold text-brand-terracotta mb-1">Refunds</h3>
+                {selected.refunds.map((r, idx) => <p key={idx} className="text-sm">{gbp(r.amount)} on {dt(r.at)} by {r.by}</p>)}
+              </div>
+            )}
+
+            <div className="flex gap-3 flex-wrap">
+              {selected.payment_status === "paid" && selected.status !== "refunded" && <button onClick={() => refund(selected)} className="border-2 border-brand-terracotta text-brand-terracotta rounded-full px-6 py-2.5 font-semibold" data-testid="order-refund-btn">Refund</button>}
+              {selected.fulfilment === "bulky_delivery" && selected.delivery_quote?.status !== "paid" && <button onClick={() => quote(selected)} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold">Set delivery quote</button>}
+              <button onClick={() => setSelected(null)} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold ml-auto">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -88,6 +88,9 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 ## v3 round 7 (this session — 2026-06)
 - **VAT declaration PDF receipts + email**: `/app/backend/receipts.py` generates a branded PDF per declaration (order ref, date, eligible person, condition, signature, itemised VAT-relieved lines, totals, and the declaration wording). Admin → VAT Declarations rows now have **PDF** (authenticated download/print, `GET /api/admin/vat-declarations/{id}/receipt.pdf`) and **Email** (`POST /api/admin/vat-declarations/{id}/email-receipt`) actions. Email uses Emergent-managed **Resend** — sends the customer (on-file email only, per guardrail G4) an inline receipt summary plus a first-party tokenised secure PDF link (`GET /api/vat-declarations/{id}/receipt.pdf?token=`, bad token → 403). "Sent {date}" shown after emailing. Verified: PDF 200 (3.2KB), tokenised link 200, bad token 403, email send returned an email_id.
 
+## v3 round 8 (this session — 2026-06)
+- **Order detail view**: Admin → Orders rows are now clickable (plus a "View" button) opening a detail modal showing status/payment/Xero, customer contact + address, fulfilment + delivery questionnaire, VAT-relief flag, itemised line table (with per-line relief marker), totals breakdown, delivery quote, and refund history. Added inline **status update** dropdown (uses existing `PUT /api/admin/orders/{id}/status`). Refund + delivery-quote actions available from the modal. Frontend-only; no backend change (list endpoint already returns full docs). Verified via screenshot.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.
