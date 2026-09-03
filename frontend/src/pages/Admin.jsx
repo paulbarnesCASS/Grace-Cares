@@ -838,21 +838,79 @@ function VatDeclarations() {
 const ED_STATUSES = ["new", "under_review", "more_info", "accepted", "collection_arranged", "dropoff_arranged", "received", "declined", "closed"];
 function EquipmentDonations() {
   const [items, setItems] = useState([]);
+  const [cats, setCats] = useState([]);
+  const [stock, setStock] = useState(null); // prefilled product being added
   const load = () => api.get("/admin/equipment-donations").then((r) => setItems(r.data));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get("/categories?include_hidden=true").then((r) => setCats(r.data)).catch(() => {}); }, []);
   const setStatus = async (id, status) => { await api.put(`/admin/equipment-donations/${id}`, { status }); toast.success("Updated"); load(); };
+  const GRADE = (c) => { const t = (c || "").toLowerCase(); if (t.includes("very")) return "Very Good"; if (t.includes("fair") || t.includes("poor")) return "Fair"; return "Good"; };
+  const addToStock = (d) => {
+    setStock({
+      ...EMPTY_PRODUCT,
+      _donationId: d.id, _ref: d.reference,
+      name: d.equipment_type || "", sku: d.reference || "",
+      description: d.notes || "", condition: GRADE(d.condition),
+      status: "draft", images: "",
+    });
+  };
+  const saveStock = async () => {
+    if (!stock.name?.trim() || !stock.sku?.trim()) return toast.error("Name and SKU are required");
+    if (!(Number(stock.price_ex_vat) >= 0)) return toast.error("Enter a valid price");
+    const b = {
+      ...stock,
+      price_ex_vat: Number(stock.price_ex_vat) || 0,
+      quantity_available: Number(stock.quantity_available) || 1,
+      weight_kg: Number(stock.weight_kg) || 0, vat_rate: Number(stock.vat_rate) || 0.2,
+      carbon_saving_kg: Number(stock.carbon_saving_kg) || 0, delivery_charge: Number(stock.delivery_charge) || 0,
+      images: typeof stock.images === "string" ? stock.images.split(",").map((s) => s.trim()).filter(Boolean) : stock.images,
+    };
+    delete b._donationId; delete b._ref;
+    try {
+      await api.post("/products", b);
+      await api.put(`/admin/equipment-donations/${stock._donationId}`, { status: "received" });
+      toast.success("Added to stock as a draft — publish it from Products when ready");
+      setStock(null); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const input = "w-full rounded-lg border border-[#8C8C8C] px-3 py-2";
   return (
     <div data-testid="admin-equipment">
       <H>Equipment donation submissions</H>
       <div className="space-y-3">{items.map((d) => (
         <Card key={d.id}>
-          <div className="flex justify-between flex-wrap gap-2">
+          <div className="flex justify-between flex-wrap gap-2 items-start">
             <div><strong>{d.equipment_type}</strong> from {d.donor_name} · {d.postcode} · Ref {d.reference}<div className="text-[#4A4A4D]">{d.email} · {d.phone} · Condition: {d.condition} · {d.working ? "Working" : "Not working"}</div></div>
-            <select value={d.status} onChange={(e) => setStatus(d.id, e.target.value)} className="rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" data-testid={`ed-status-${d.reference}`}>{ED_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            <div className="flex items-center gap-2">
+              <button onClick={() => addToStock(d)} className="inline-flex items-center gap-1 bg-brand-terracotta text-white rounded-full px-4 py-2 font-semibold text-sm" data-testid={`ed-addstock-${d.reference}`}><Plus size={16} /> Add to stock</button>
+              <select value={d.status} onChange={(e) => setStatus(d.id, e.target.value)} className="rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" data-testid={`ed-status-${d.reference}`}>{ED_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+            </div>
           </div>
           {d.notes && <div className="text-[#4A4A4D] mt-2">Notes: {d.notes}</div>}
         </Card>
       ))}{items.length === 0 && <p className="text-[#4A4A4D]">No submissions yet.</p>}</div>
+
+      {stock && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-auto" onClick={() => setStock(null)}>
+          <div className="bg-white rounded-2xl p-7 max-w-2xl w-full my-8 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()} data-testid="addstock-modal">
+            <h2 className="font-heading text-2xl font-bold text-brand-green mb-1">Add donation to stock</h2>
+            <p className="text-[#4A4A4D] text-sm mb-4">From donation {stock._ref}. Saved as a <strong>draft</strong> for approval before it goes live.</p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2"><label className="font-semibold">Name *</label><input className={input} value={stock.name} onChange={(e) => setStock({ ...stock, name: e.target.value })} data-testid="as-name" /></div>
+              <div><label className="font-semibold">SKU *</label><input className={input} value={stock.sku} onChange={(e) => setStock({ ...stock, sku: e.target.value })} data-testid="as-sku" /></div>
+              <div><label className="font-semibold">Category</label><select className={`${input} bg-white`} value={stock.category_id || ""} onChange={(e) => setStock({ ...stock, category_id: e.target.value })} data-testid="as-category"><option value="">—</option>{cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+              <div><label className="font-semibold">Price ex VAT (£) *</label><input type="number" step="0.01" className={input} value={stock.price_ex_vat} onChange={(e) => setStock({ ...stock, price_ex_vat: e.target.value })} data-testid="as-price" /></div>
+              <div><label className="font-semibold">Quantity</label><input type="number" className={input} value={stock.quantity_available} onChange={(e) => setStock({ ...stock, quantity_available: e.target.value })} data-testid="as-qty" /></div>
+              <div><label className="font-semibold">Condition</label><select className={`${input} bg-white`} value={stock.condition} onChange={(e) => setStock({ ...stock, condition: e.target.value })} data-testid="as-condition"><option>Very Good</option><option>Good</option><option>Fair</option></select></div>
+              <div><label className="font-semibold">Weight (kg)</label><input type="number" step="0.1" className={input} value={stock.weight_kg} onChange={(e) => setStock({ ...stock, weight_kg: e.target.value })} data-testid="as-weight" /></div>
+              <div><label className="font-semibold">Fulfilment route</label><select className={`${input} bg-white`} value={stock.fulfilment_route} onChange={(e) => setStock({ ...stock, fulfilment_route: e.target.value })} data-testid="as-route"><option value="postable">Postable</option><option value="hub_collection">Hub collection</option><option value="bulky_delivery">Bulky delivery</option></select></div>
+              <div className="sm:col-span-2"><label className="font-semibold">Description</label><textarea rows={3} className={input} value={stock.description} onChange={(e) => setStock({ ...stock, description: e.target.value })} data-testid="as-description" /></div>
+              <div className="sm:col-span-2"><label className="font-semibold">Image URLs (comma separated)</label><input className={input} value={stock.images} onChange={(e) => setStock({ ...stock, images: e.target.value })} data-testid="as-images" /></div>
+              <label className="flex items-center gap-2 font-semibold"><input type="checkbox" checked={stock.vat_relief_eligible} onChange={(e) => setStock({ ...stock, vat_relief_eligible: e.target.checked })} className="h-5 w-5" data-testid="as-vat-relief" /> Eligible for VAT relief</label>
+            </div>
+            <div className="flex gap-3 mt-5"><button onClick={saveStock} className="bg-brand-green text-white rounded-full px-6 py-3 font-semibold" data-testid="as-save">Add to stock</button><button onClick={() => setStock(null)} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-3 font-semibold">Cancel</button></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

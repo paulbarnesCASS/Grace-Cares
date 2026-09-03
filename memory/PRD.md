@@ -112,6 +112,9 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 ## v3 round 13 (this session — 2026-06)
 - **Period comparison on dashboard tiles**: `/admin/reports/summary` now also computes the equal-length previous period (when a date range is set) and returns `previous` + `previous_period`. Each tile shows a ▲/▼ % change vs the previous period (green up / terracotta down, "▲ new" when prior was zero, "no change" when both zero); omitted for "all time". Verified: Sep → prev Aug 2–31, all-time omits comparison, tiles render deltas (bookings/downloads/signups showed ▼100%).
 
+## v3 round 14 (this session — 2026-06)
+- **"Add to stock" from equipment donations**: each donation submission (Admin → Equipment Donations) now has an **Add to stock** button that opens a new-product window pre-filled from the donation (name ← equipment type, SKU ← donation ref, condition mapped to grade, description ← notes). Admin completes the required fields (price, category, quantity, weight, fulfilment route, VAT relief) and saves; product is created as a **draft** via `POST /products` (goes through the existing approval/publish workflow) and the donation is auto-advanced to `received`. Verified end-to-end: draft "Wheelchair" (ED-14193004, £45) created and listed in Products with Publish action.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.
