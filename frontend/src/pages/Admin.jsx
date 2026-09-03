@@ -145,6 +145,17 @@ function Products() {
     setItems(Object.values(map));
   };
   const approve = async (id) => { await api.post(`/products/${id}/approve`); toast.success("Published — now live in the shop"); load(); };
+  const [showImport, setShowImport] = useState(false);
+  const [csv, setCsv] = useState("");
+  const importProducts = async () => {
+    try {
+      const r = await api.post("/admin/products/import", { csv });
+      toast.success(`Imported: ${r.data.created} new, ${r.data.updated} updated`);
+      if (r.data.errors?.length) toast.error(`${r.data.errors.length} row(s) skipped — see first: ${r.data.errors[0]}`);
+      setCsv(""); setShowImport(false); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const base = api.defaults.baseURL;
   useEffect(() => { load(); api.get("/categories?include_hidden=true").then((r) => setCats(r.data)); }, []);
 
   const save = async () => {
@@ -159,7 +170,25 @@ function Products() {
   const input = "w-full rounded-lg border border-[#8C8C8C] px-3 py-2";
   return (
     <div data-testid="admin-products">
-      <div className="flex justify-between items-center mb-6"><H>Products</H><button onClick={() => setEdit({ ...EMPTY_PRODUCT })} className="inline-flex items-center gap-2 bg-brand-terracotta text-white rounded-full px-5 py-2.5 font-semibold" data-testid="add-product-btn"><Plus size={18} /> Add product</button></div>
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
+        <H>Products</H>
+        <div className="flex gap-2 flex-wrap">
+          <a href={`${base}/admin/product-template.csv`} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2.5 font-semibold" data-testid="download-template"><Download size={18} /> Template</a>
+          <a href={`${base}/admin/products-export.csv`} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2.5 font-semibold" data-testid="export-products"><Download size={18} /> Export CSV</a>
+          <button onClick={() => setShowImport(!showImport)} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2.5 font-semibold" data-testid="toggle-import"><ClipboardList size={18} /> Import CSV</button>
+          <button onClick={() => setEdit({ ...EMPTY_PRODUCT })} className="inline-flex items-center gap-2 bg-brand-terracotta text-white rounded-full px-5 py-2.5 font-semibold" data-testid="add-product-btn"><Plus size={18} /> Add product</button>
+        </div>
+      </div>
+      {showImport && (
+        <Card className="mb-6" >
+          <label className="font-semibold block mb-1">Paste product CSV (match the template columns; rows are matched/updated by SKU)</label>
+          <textarea rows={5} className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2 font-mono text-sm" placeholder="name,sku,category_slug,description,condition,price_ex_vat,..." value={csv} onChange={(e) => setCsv(e.target.value)} data-testid="products-csv" />
+          <div className="flex gap-3 mt-3">
+            <button onClick={importProducts} disabled={!csv.trim()} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold disabled:opacity-50" data-testid="import-products">Import products</button>
+            <a href={`${base}/admin/product-template.csv`} className="text-brand-green font-semibold self-center underline">Download the template first</a>
+          </div>
+        </Card>
+      )}
       <Card className="overflow-x-auto p-0">
         <table className="w-full text-left"><thead className="bg-brand-bone"><tr><th className="p-3">Name</th><th className="p-3">SKU</th><th className="p-3">Price ex VAT</th><th className="p-3">VAT relief</th><th className="p-3">Stock</th><th className="p-3">Status</th><th className="p-3"></th></tr></thead>
           <tbody>{items.map((p, i) => (

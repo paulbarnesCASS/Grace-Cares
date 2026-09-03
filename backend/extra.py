@@ -1,6 +1,8 @@
 """v3 extras: product approve/draft workflow, fulfilment info, Grace AI stub,
 sitemap.xml, robots.txt, and 301 redirect manager."""
 import os
+import csv as _csv
+import io as _io
 import stripe
 from fastapi import APIRouter, HTTPException, Depends, Response, Request
 from fastapi.responses import PlainTextResponse
@@ -205,3 +207,108 @@ async def import_redirects(body: ImportBody, user=Depends(require_admin("content
         count += 1
     await log_audit(user, "import", "redirects", after={"imported": count})
     return {"ok": True, "imported": count}
+
+
+# ---------- Product import / export ----------
+PRODUCT_COLUMNS = ["name", "sku", "category_slug", "description", "condition",
+                   "price_ex_vat", "vat_rate", "vat_relief_eligible", "quantity_available",
+                   "weight_kg", "fulfilment_route", "stock_model", "delivery_charge",
+                   "carbon_saving_kg", "dimensions", "max_user_weight", "safety_info",
+                   "status", "featured", "image_urls"]
+
+
+def _b(v):
+    return str(v).strip().lower() in ("true", "yes", "1", "y")
+
+
+def _csv_response(rows, filename):
+    out = _io.StringIO()
+    w = _csv.writer(out)
+    w.writerow(PRODUCT_COLUMNS)
+    for r in rows:
+        w.writerow(r)
+    return Response(content=out.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@extra_router.get("/admin/product-template.csv")
+async def product_template(user=Depends(require_admin("shop_admin", "product_contributor", "product_approver"))):
+    example = ["Folding Wheelchair", "MOB-100", "mobility",
+               "Lightweight folding wheelchair, serviced.", "Good, visible signs of previous use but fully functional.",
+               "120.00", "0.20", "true", "1", "14", "hub_collection", "unique",
+               "25", "40", "94 x 66 x 91 cm", "115 kg", "Brakes tested.", "draft", "false",
+               "https://example.com/photo1.jpg|https://example.com/photo2.jpg"]
+    return _csv_response([example], "grace-cares-product-template.csv")
+
+
+@extra_router.get("/admin/products-export.csv")
+async def product_export(user=Depends(require_admin("shop_admin", "product_approver"))):
+    cats = {str(c["_id"]): c.get("slug", "") for c in await db.categories.find().to_list(200)}
+    rows = []
+    for p in await db.products.find().sort("created_at", -1).to_list(5000):
+        rows.append([
+            p.get("name", ""), p.get("sku", ""), cats.get(p.get("category_id"), ""),
+            p.get("description", ""), p.get("condition", ""), p.get("price_ex_vat", 0),
+            p.get("vat_rate", 0.2), p.get("vat_relief_eligible", False),
+            p.get("quantity_available", 0), p.get("weight_kg", 0),
+            p.get("fulfilment_route", "hub_collection"), p.get("stock_model", "unique"),
+            p.get("delivery_charge", 0), p.get("carbon_saving_kg", 0), p.get("dimensions", ""),
+            p.get("max_user_weight", ""), p.get("safety_info", ""), p.get("status", "available"),
+            p.get("featured", False), "|".join(p.get("images", []))])
+    return _csv_response(rows, "grace-cares-products.csv")
+
+
+@extra_router.post("/admin/products/import")
+async def product_import(body: ImportBody, user=Depends(require_admin("shop_admin", "product_approver"))):
+    slug_to_id = {c.get("slug"): str(c["_id"]) for c in await db.categories.find().to_list(200)}
+    reader = _csv.DictReader(_io.StringIO(body.csv))
+    created, updated, errors = 0, 0, []
+    contributor = user["role"] == "product_contributor"
+    for i, row in enumerate(reader, start=2):
+        sku = (row.get("sku") or "").strip()
+        name = (row.get("name") or "").strip()
+        if not sku or not name:
+            errors.append(f"Row {i}: name and sku are required")
+            continue
+        try:
+            fields = {
+                "name": name, "sku": sku,
+                "category_id": slug_to_id.get((row.get("category_slug") or "").strip()),
+                "description": row.get("description", ""),
+                "condition": row.get("condition", "Good"),
+                "price_ex_vat": float(row.get("price_ex_vat") or 0),
+                "vat_rate": float(row.get("vat_rate") or 0.2),
+                "vat_relief_eligible": _b(row.get("vat_relief_eligible")),
+                "quantity_available": int(float(row.get("quantity_available") or 0)),
+                "weight_kg": float(row.get("weight_kg") or 0),
+                "fulfilment_route": (row.get("fulfilment_route") or "hub_collection").strip(),
+                "stock_model": (row.get("stock_model") or "unique").strip(),
+                "delivery_charge": float(row.get("delivery_charge") or 0),
+                "carbon_saving_kg": float(row.get("carbon_saving_kg") or 0),
+                "dimensions": row.get("dimensions", ""),
+                "max_user_weight": row.get("max_user_weight", ""),
+                "safety_info": row.get("safety_info", ""),
+                "featured": _b(row.get("featured")),
+                "images": [u.strip() for u in (row.get("image_urls") or "").split("|") if u.strip()],
+            }
+            status = (row.get("status") or "").strip() or "available"
+            if contributor:
+                status = "draft"  # contributors can only import drafts
+            fields["status"] = status
+        except ValueError as e:
+            errors.append(f"Row {i} ({sku}): invalid number — {e}")
+            continue
+        existing = await db.products.find_one({"sku": sku})
+        if existing:
+            await db.products.update_one({"_id": existing["_id"]}, {"$set": fields})
+            updated += 1
+        else:
+            fields.update({"quantity_reserved": 0, "vat_rate": fields["vat_rate"],
+                           "listing_type": "sale", "specifications": {}, "related_ids": [],
+                           "fulfilment_options": ["collection", "delivery"], "created_at": now_utc()})
+            res = await db.products.insert_one(fields)
+            created += 1
+            if status in ("draft", "awaiting_approval"):
+                await notify_admins("new_listing", f"Imported listing '{name}' ({sku}) awaiting approval.", str(res.inserted_id))
+    await log_audit(user, "import", "products", after={"created": created, "updated": updated})
+    return {"ok": True, "created": created, "updated": updated, "errors": errors}
