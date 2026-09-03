@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, Package, ShoppingCart, ShieldCheck, HandHeart, Calendar,
   RefreshCw, Users, MessageSquare, FileText, LogOut, Plus, Leaf, AlertTriangle, Download,
-  Link2, ClipboardList, CheckCircle2, Truck, Bell,
+  Link2, ClipboardList, CheckCircle2, Truck, Bell, Edit3,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -372,23 +372,113 @@ function Orders() {
   );
 }
 
+function VatStatementEditor() {
+  const [stmt, setStmt] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { api.get("/admin/vat-declaration-statement").then((r) => setStmt(r.data)).catch(() => {}); }, []);
+  const save = async () => {
+    try {
+      const body = { ...stmt, bullets: typeof stmt.bullets === "string" ? stmt.bullets.split("\n").map((s) => s.trim()).filter(Boolean) : stmt.bullets };
+      const r = await api.put("/admin/vat-declaration-statement", { statement: body });
+      setStmt(r.data.statement);
+      toast.success("Declaration wording saved — now live at checkout");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const inp = "w-full rounded-lg border border-[#8C8C8C] px-3 py-2";
+  if (!stmt) return null;
+  const bulletsText = Array.isArray(stmt.bullets) ? stmt.bullets.join("\n") : stmt.bullets;
+  return (
+    <Card className="mb-6" data-testid="vat-statement-editor">
+      <button onClick={() => setOpen(!open)} className="flex items-center gap-2 font-bold text-brand-green text-lg" data-testid="toggle-statement-editor"><Edit3 size={18} /> Edit the VAT declaration wording {open ? "▲" : "▼"}</button>
+      {open && (
+        <div className="mt-4 space-y-3">
+          <p className="text-sm text-[#4A4A4D]">This is the exact wording customers see when claiming VAT relief at checkout. Changes go live immediately.</p>
+          <div><label className="font-semibold block mb-1">Section heading</label><input className={inp} value={stmt.heading} onChange={(e) => setStmt({ ...stmt, heading: e.target.value })} data-testid="stmt-heading" /></div>
+          <div><label className="font-semibold block mb-1">Intro paragraph</label><textarea rows={3} className={inp} value={stmt.intro} onChange={(e) => setStmt({ ...stmt, intro: e.target.value })} data-testid="stmt-intro" /></div>
+          <div><label className="font-semibold block mb-1">Guidance bullet points (one per line)</label><textarea rows={4} className={inp} value={bulletsText} onChange={(e) => setStmt({ ...stmt, bullets: e.target.value })} data-testid="stmt-bullets" /></div>
+          <div><label className="font-semibold block mb-1">Choice — personal use</label><input className={inp} value={stmt.choice_personal} onChange={(e) => setStmt({ ...stmt, choice_personal: e.target.value })} data-testid="stmt-choice-personal" /></div>
+          <div><label className="font-semibold block mb-1">Choice — on behalf of</label><input className={inp} value={stmt.choice_behalf} onChange={(e) => setStmt({ ...stmt, choice_behalf: e.target.value })} data-testid="stmt-choice-behalf" /></div>
+          <div><label className="font-semibold block mb-1">Choice — does not qualify</label><input className={inp} value={stmt.choice_not_qualify} onChange={(e) => setStmt({ ...stmt, choice_not_qualify: e.target.value })} data-testid="stmt-choice-notqualify" /></div>
+          <div><label className="font-semibold block mb-1">Confirmation — personal/domestic use</label><input className={inp} value={stmt.confirm_domestic} onChange={(e) => setStmt({ ...stmt, confirm_domestic: e.target.value })} data-testid="stmt-confirm-domestic" /></div>
+          <div><label className="font-semibold block mb-1">Confirmation — information accurate</label><input className={inp} value={stmt.confirm_accurate} onChange={(e) => setStmt({ ...stmt, confirm_accurate: e.target.value })} data-testid="stmt-confirm-accurate" /></div>
+          <button onClick={save} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="save-statement">Save wording</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function VatDeclarations() {
   const [items, setItems] = useState([]);
   const [err, setErr] = useState("");
-  useEffect(() => { api.get("/admin/vat-declarations").then((r) => setItems(r.data)).catch((e) => setErr(formatApiErrorDetail(e.response?.data?.detail))); }, []);
+  const [preset, setPreset] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const base = api.defaults.baseURL;
+
+  const applyPreset = (p) => {
+    setPreset(p);
+    const now = new Date();
+    const iso = (d) => d.toISOString().slice(0, 10);
+    if (p === "this_month") { setFrom(iso(new Date(now.getFullYear(), now.getMonth(), 1))); setTo(iso(new Date(now.getFullYear(), now.getMonth() + 1, 0))); }
+    else if (p === "last_month") { setFrom(iso(new Date(now.getFullYear(), now.getMonth() - 1, 1))); setTo(iso(new Date(now.getFullYear(), now.getMonth(), 0))); }
+    else if (p === "this_year") { setFrom(iso(new Date(now.getFullYear(), 0, 1))); setTo(iso(new Date(now.getFullYear(), 11, 31))); }
+    else if (p === "last_year") { setFrom(iso(new Date(now.getFullYear() - 1, 0, 1))); setTo(iso(new Date(now.getFullYear() - 1, 11, 31))); }
+    else if (p === "all") { setFrom(""); setTo(""); }
+  };
+
+  const qs = () => {
+    const p = new URLSearchParams();
+    if (from) p.set("date_from", from);
+    if (to) p.set("date_to", to);
+    return p.toString();
+  };
+  const load = () => {
+    const q = qs();
+    api.get(`/admin/vat-declarations${q ? `?${q}` : ""}`).then((r) => setItems(r.data)).catch((e) => setErr(formatApiErrorDetail(e.response?.data?.detail)));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [from, to]);
+
+  const PRESETS = [["all", "All time"], ["this_month", "This month"], ["last_month", "Last month"], ["this_year", "This calendar year"], ["last_year", "Last calendar year"], ["custom", "Custom dates"]];
+
   return (
     <div data-testid="admin-vat">
       <H>VAT relief declarations</H>
+      <VatStatementEditor />
+      <Card className="mb-6" data-testid="vat-report-controls">
+        <label className="font-semibold block mb-2">Download declarations report — choose a period</label>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {PRESETS.map(([k, lbl]) => (
+            <button key={k} onClick={() => applyPreset(k)} className={`rounded-full px-4 py-2 font-semibold border-2 ${preset === k ? "border-brand-green bg-brand-green text-white" : "border-brand-border text-brand-green"}`} data-testid={`vat-preset-${k}`}>{lbl}</button>
+          ))}
+        </div>
+        {preset === "custom" && (
+          <div className="grid sm:grid-cols-2 gap-3 max-w-lg mb-3">
+            <div><label className="text-sm font-semibold block mb-1">From</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={from} onChange={(e) => setFrom(e.target.value)} data-testid="vat-from" /></div>
+            <div><label className="text-sm font-semibold block mb-1">To</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={to} onChange={(e) => setTo(e.target.value)} data-testid="vat-to" /></div>
+          </div>
+        )}
+        <div className="flex items-center gap-4 flex-wrap">
+          <a href={`${base}/admin/vat-declarations-export.csv${qs() ? `?${qs()}` : ""}`} className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="vat-export-download"><Download size={18} /> Download CSV</a>
+          <span className="text-[#4A4A4D]">{items.length} declaration{items.length === 1 ? "" : "s"}{(from || to) ? ` between ${from || "start"} and ${to || "now"}` : " in total"}</span>
+        </div>
+      </Card>
       {err && <Card className="text-[#B71C1C]">{err}</Card>}
-      <div className="space-y-3">{items.map((d) => (
-        <Card key={d.id}>
-          <div className="font-bold text-brand-green">{d.eligible_person_name} — order {d.order_reference}</div>
-          <div className="text-[#4A4A4D] mt-1">Condition: {d.condition_description}</div>
-          <div className="text-[#4A4A4D]">Address: {d.eligible_person_address}</div>
-          {d.completed_by_name && <div className="text-[#4A4A4D]">Completed by: {d.completed_by_name} ({d.relationship})</div>}
-          <div className="text-sm text-[#4A4A4D] mt-1">Signed: {d.signature} · {new Date(d.created_at).toLocaleString("en-GB")}</div>
-        </Card>
-      ))}{items.length === 0 && !err && <p className="text-[#4A4A4D]">No declarations yet.</p>}</div>
+      <Card className="overflow-x-auto p-0">
+        <table className="w-full text-left text-sm"><thead className="bg-brand-bone"><tr><th className="p-3">Date</th><th className="p-3">Order</th><th className="p-3">Eligible person</th><th className="p-3">Condition</th><th className="p-3">Completed by</th><th className="p-3">Signature</th></tr></thead>
+          <tbody>{items.map((d, i) => (
+            <tr key={d.id} className={i % 2 ? "bg-brand-bone" : ""} data-testid={`vat-row-${d.order_reference}`}>
+              <td className="p-3 whitespace-nowrap">{new Date(d.created_at).toLocaleDateString("en-GB")}</td>
+              <td className="p-3 font-semibold">{d.order_reference}</td>
+              <td className="p-3">{d.eligible_person_name}<div className="text-[#4A4A4D]">{d.eligible_person_address}</div></td>
+              <td className="p-3">{d.condition_description}</td>
+              <td className="p-3">{d.completed_by_name || "—"}{d.relationship ? ` (${d.relationship})` : ""}</td>
+              <td className="p-3">{d.signature}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+        {items.length === 0 && !err && <p className="text-[#4A4A4D] p-4">No declarations in this period.</p>}
+      </Card>
     </div>
   );
 }

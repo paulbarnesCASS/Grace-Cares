@@ -53,6 +53,34 @@ DEFAULT_BANDS = [{"max_kg": 2, "price": 4.95}, {"max_kg": 5, "price": 7.95},
                  {"max_kg": 9999, "price": 24.95}]
 
 
+# Editable VAT-relief declaration wording shown at checkout (admin can change).
+DEFAULT_VAT_STATEMENT = {
+    "heading": "VAT relief declaration",
+    "intro": "Your basket contains items that may qualify for VAT relief. To claim, both must be true: the product is approved as eligible, and you complete the declaration below.",
+    "bullets": [
+        "Being elderly on its own does not qualify.",
+        "A temporary injury or condition does not normally qualify.",
+        "If you don't qualify or don't complete the declaration, standard VAT applies to those items.",
+    ],
+    "choice_personal": "My own personal or domestic use (I am disabled or have a long-term illness)",
+    "choice_behalf": "An eligible person I am purchasing on behalf of",
+    "choice_not_qualify": "Another purpose — I do not qualify / do not wish to claim (standard VAT applies)",
+    "confirm_domestic": "I confirm the goods are for the eligible person's personal or domestic use.",
+    "confirm_accurate": "I declare that the information above is accurate and complete.",
+}
+
+
+async def get_vat_statement() -> dict:
+    s = await db.site_settings.find_one({"key": "vat_declaration"})
+    merged = {**DEFAULT_VAT_STATEMENT, **((s or {}).get("statement") or {})}
+    return merged
+
+
+@shop_router.get("/vat-declaration-statement")
+async def public_vat_statement():
+    return await get_vat_statement()
+
+
 async def get_postage(weight: float) -> float:
     s = await db.site_settings.find_one({"key": "postage_bands"})
     bands = (s or {}).get("bands", DEFAULT_BANDS)

@@ -147,10 +147,70 @@ async def audit_logs(user=Depends(require_admin("super_admin"))):
 
 
 # ---------------- VAT declarations (restricted) ----------------
+def _parse_range(date_from, date_to):
+    from datetime import datetime as _dt, timezone as _tz
+    q = {}
+    if date_from:
+        q["$gte"] = _dt.fromisoformat(date_from).replace(tzinfo=_tz.utc)
+    if date_to:
+        q["$lte"] = _dt.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=_tz.utc)
+    return {"created_at": q} if q else {}
+
+
 @admin_router.get("/admin/vat-declarations")
-async def vat_declarations(user=Depends(require_admin("finance_admin"))):
-    docs = await db.vat_declarations.find().sort("created_at", -1).to_list(500)
+async def vat_declarations(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                           user=Depends(require_admin("finance_admin"))):
+    query = _parse_range(date_from, date_to)
+    docs = await db.vat_declarations.find(query).sort("created_at", -1).to_list(2000)
     return cleans(docs)
+
+
+VAT_EXPORT_COLUMNS = ["created_at", "order_reference", "customer_email", "eligible_person_name",
+                      "eligible_person_address", "condition_description", "for_personal_domestic_use",
+                      "completed_by_name", "relationship", "info_accurate", "signature"]
+
+
+@admin_router.get("/admin/vat-declarations-export.csv")
+async def vat_declarations_export(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                                  user=Depends(require_admin("finance_admin"))):
+    query = _parse_range(date_from, date_to)
+    docs = await db.vat_declarations.find(query).sort("created_at", -1).to_list(5000)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(VAT_EXPORT_COLUMNS)
+    for d in docs:
+        ca = d.get("created_at")
+        w.writerow([ca.isoformat() if hasattr(ca, "isoformat") else (ca or ""),
+                    d.get("order_reference", ""), d.get("customer_email", ""),
+                    d.get("eligible_person_name", ""), d.get("eligible_person_address", ""),
+                    d.get("condition_description", ""), d.get("for_personal_domestic_use", ""),
+                    d.get("completed_by_name", ""), d.get("relationship", ""),
+                    d.get("info_accurate", ""), d.get("signature", "")])
+    fn = "vat-declarations"
+    if date_from or date_to:
+        fn += f"_{date_from or 'start'}_to_{date_to or 'now'}"
+    return Response(content=out.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={fn}.csv"})
+
+
+class VatStatementBody(BaseModel):
+    statement: dict
+
+
+@admin_router.get("/admin/vat-declaration-statement")
+async def get_vat_statement_admin(user=Depends(require_admin("finance_admin", "content_admin"))):
+    from shop import get_vat_statement
+    return await get_vat_statement()
+
+
+@admin_router.put("/admin/vat-declaration-statement")
+async def set_vat_statement_admin(body: VatStatementBody, user=Depends(require_admin("finance_admin", "content_admin"))):
+    from shop import log_audit, DEFAULT_VAT_STATEMENT
+    stmt = {k: body.statement.get(k, DEFAULT_VAT_STATEMENT[k]) for k in DEFAULT_VAT_STATEMENT}
+    await db.site_settings.update_one({"key": "vat_declaration"},
+        {"$set": {"key": "vat_declaration", "statement": stmt}}, upsert=True)
+    await log_audit(user, "update", "vat_declaration_statement", after=stmt)
+    return {"ok": True, "statement": stmt}
 
 
 # ---------------- User / role management ----------------

@@ -81,6 +81,10 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Object Storage for photos**: integrated Emergent Object Storage (`/app/backend/storage.py`). Bulk zip photo import (`/api/admin/products/import-photos`) and a NEW single-photo upload on the product edit form (`/api/admin/products/upload-image`) now push image bytes to the bucket and store a served URL (`/api/files/{path}`) instead of base64 — ends MongoDB document bloat. Images served via public passthrough endpoint with long cache headers. Verified: upload returns URL, served file is image/png.
 - **Product export filters**: `/api/admin/products-export.csv` accepts `category` (slug or id), `stock_status` (in_stock/low_stock/out_of_stock), `date_from`, `date_to`. Admin → Products has an "Export CSV" filter panel. Verified: category=mobility → 4 rows, date_to=2020 → header only, stock filters apply.
 
+## v3 round 6 (this session — 2026-06)
+- **Editable VAT declaration wording**: admin can edit the exact checkout declaration statement (heading, intro, guidance bullets, three purpose choices, both confirmation lines) via Admin → VAT Declarations → "Edit the VAT declaration wording". Stored in `site_settings` key `vat_declaration`; served publicly at `GET /api/vat-declaration-statement`; checkout reads it live with code defaults as fallback. Endpoints: `GET/PUT /api/admin/vat-declaration-statement` (finance_admin/content_admin/super_admin).
+- **VAT declarations report + export**: Admin → VAT Declarations now has date presets (All time, This month, Last month, This calendar year, Last calendar year, Custom) that filter an on-screen table and a CSV download. Endpoints: `GET /api/admin/vat-declarations?date_from&date_to` and `GET /api/admin/vat-declarations-export.csv?date_from&date_to` (finance_admin). Verified: 2020 range → 0, current year → 2, CSV downloads with all declaration columns.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

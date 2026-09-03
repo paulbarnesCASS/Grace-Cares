@@ -19,6 +19,9 @@ export default function Checkout() {
   const [decl, setDecl] = useState({ eligible_person_name: "", eligible_person_address: "", condition_description: "", for_personal_domestic_use: true, completed_by_name: "", relationship: "", info_accurate: false, signature: "" });
   const [quote, setQuote] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [stmt, setStmt] = useState(null);
+
+  useEffect(() => { api.get("/vat-declaration-statement").then((r) => setStmt(r.data)).catch(() => {}); }, []);
 
   const hasEligible = items.some((i) => i.vat_relief_eligible);
   const claimingRelief = hasEligible && (vatChoice === "personal" || vatChoice === "behalf");
@@ -118,23 +121,21 @@ export default function Checkout() {
           {/* VAT relief */}
           {hasEligible && (
             <section className="bg-white rounded-2xl border-2 border-[#A5D6A7] p-6" data-testid="vat-relief-section">
-              <div className="flex items-center gap-2 mb-3"><ShieldCheck className="text-[#1B5E20]" /><h2 className="font-heading text-2xl font-bold text-brand-green">VAT relief declaration</h2></div>
+              <div className="flex items-center gap-2 mb-3"><ShieldCheck className="text-[#1B5E20]" /><h2 className="font-heading text-2xl font-bold text-brand-green">{stmt?.heading || "VAT relief declaration"}</h2></div>
               <div className="bg-[#E8F5E9] rounded-xl p-4 text-[#1B5E20] mb-4 flex gap-2">
                 <Info size={20} className="shrink-0 mt-0.5" />
                 <div className="text-base">
-                  <p className="mb-1">Your basket contains items that may qualify for VAT relief. To claim, both must be true: the product is approved as eligible, <strong>and</strong> you complete the declaration below.</p>
+                  <p className="mb-1">{stmt?.intro || "Your basket contains items that may qualify for VAT relief. To claim, both must be true: the product is approved as eligible, and you complete the declaration below."}</p>
                   <ul className="list-disc ml-5 space-y-0.5">
-                    <li>Being elderly on its own does not qualify.</li>
-                    <li>A temporary injury or condition does not normally qualify.</li>
-                    <li>If you don't qualify or don't complete the declaration, standard VAT applies to those items.</li>
+                    {(stmt?.bullets || ["Being elderly on its own does not qualify.", "A temporary injury or condition does not normally qualify.", "If you don't qualify or don't complete the declaration, standard VAT applies to those items."]).map((b, i) => <li key={i}>{b}</li>)}
                   </ul>
                 </div>
               </div>
               <p className={label}>Is this purchase for…</p>
               <div className="space-y-2 mb-4">
-                {[["personal", "My own personal or domestic use (I am disabled or have a long-term illness)"],
-                  ["behalf", "An eligible person I am purchasing on behalf of"],
-                  ["not_qualify", "Another purpose — I do not qualify / do not wish to claim (standard VAT applies)"]].map(([v, t]) => (
+                {[["personal", stmt?.choice_personal || "My own personal or domestic use (I am disabled or have a long-term illness)"],
+                  ["behalf", stmt?.choice_behalf || "An eligible person I am purchasing on behalf of"],
+                  ["not_qualify", stmt?.choice_not_qualify || "Another purpose — I do not qualify / do not wish to claim (standard VAT applies)"]].map(([v, t]) => (
                   <label key={v} className="flex items-start gap-3 cursor-pointer" data-testid={`vat-choice-${v}`}>
                     <input type="radio" name="vat" checked={vatChoice === v} onChange={() => setVatChoice(v)} className="h-5 w-5 mt-1" />
                     <span>{t}</span>
@@ -151,8 +152,8 @@ export default function Checkout() {
                     <div><label className={label}>Your name (person completing)</label><input className={input} value={decl.completed_by_name} onChange={(e) => setDecl({ ...decl, completed_by_name: e.target.value })} data-testid="decl-completedby" /></div>
                     <div><label className={label}>Your relationship to them</label><input className={input} value={decl.relationship} onChange={(e) => setDecl({ ...decl, relationship: e.target.value })} data-testid="decl-relationship" /></div>
                   </>)}
-                  <label className="sm:col-span-2 flex items-start gap-3 cursor-pointer"><input type="checkbox" checked={decl.for_personal_domestic_use} onChange={(e) => setDecl({ ...decl, for_personal_domestic_use: e.target.checked })} className="h-5 w-5 mt-1" data-testid="decl-domestic" /><span>I confirm the goods are for the eligible person's personal or domestic use.</span></label>
-                  <label className="sm:col-span-2 flex items-start gap-3 cursor-pointer"><input type="checkbox" checked={decl.info_accurate} onChange={(e) => setDecl({ ...decl, info_accurate: e.target.checked })} className="h-5 w-5 mt-1" data-testid="decl-accurate" /><span>I declare that the information above is accurate and complete.</span></label>
+                  <label className="sm:col-span-2 flex items-start gap-3 cursor-pointer"><input type="checkbox" checked={decl.for_personal_domestic_use} onChange={(e) => setDecl({ ...decl, for_personal_domestic_use: e.target.checked })} className="h-5 w-5 mt-1" data-testid="decl-domestic" /><span>{stmt?.confirm_domestic || "I confirm the goods are for the eligible person's personal or domestic use."}</span></label>
+                  <label className="sm:col-span-2 flex items-start gap-3 cursor-pointer"><input type="checkbox" checked={decl.info_accurate} onChange={(e) => setDecl({ ...decl, info_accurate: e.target.checked })} className="h-5 w-5 mt-1" data-testid="decl-accurate" /><span>{stmt?.confirm_accurate || "I declare that the information above is accurate and complete."}</span></label>
                   <div className="sm:col-span-2"><label className={label}>Electronic signature (type your full name) *</label><input className={input} value={decl.signature} onChange={(e) => setDecl({ ...decl, signature: e.target.value })} data-testid="decl-signature" /></div>
                 </div>
               )}
