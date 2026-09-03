@@ -13,6 +13,7 @@ from shop import shop_router
 from content import content_router
 from admin import admin_router
 from extra import extra_router
+from receipts import receipts_router
 from seed_data import seed_all
 
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +26,7 @@ app.include_router(shop_router)
 app.include_router(content_router)
 app.include_router(admin_router)
 app.include_router(extra_router)
+app.include_router(receipts_router)
 
 
 @app.get("/api/")

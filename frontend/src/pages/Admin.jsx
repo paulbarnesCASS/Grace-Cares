@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, Package, ShoppingCart, ShieldCheck, HandHeart, Calendar,
   RefreshCw, Users, MessageSquare, FileText, LogOut, Plus, Leaf, AlertTriangle, Download,
-  Link2, ClipboardList, CheckCircle2, Truck, Bell, Edit3,
+  Link2, ClipboardList, CheckCircle2, Truck, Bell, Edit3, Mail,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -441,6 +441,16 @@ function VatDeclarations() {
 
   const PRESETS = [["all", "All time"], ["this_month", "This month"], ["last_month", "Last month"], ["this_year", "This calendar year"], ["last_year", "Last calendar year"], ["custom", "Custom dates"]];
 
+  const emailReceipt = async (d) => {
+    if (!d.customer_email) return toast.error("No customer email is stored on this declaration");
+    if (!window.confirm(`Email the VAT receipt for order ${d.order_reference} to ${d.customer_email}?`)) return;
+    try {
+      const r = await api.post(`/admin/vat-declarations/${d.id}/email-receipt`);
+      toast.success(`Receipt emailed to ${r.data.sent_to}`);
+      load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+
   return (
     <div data-testid="admin-vat">
       <H>VAT relief declarations</H>
@@ -465,7 +475,7 @@ function VatDeclarations() {
       </Card>
       {err && <Card className="text-[#B71C1C]">{err}</Card>}
       <Card className="overflow-x-auto p-0">
-        <table className="w-full text-left text-sm"><thead className="bg-brand-bone"><tr><th className="p-3">Date</th><th className="p-3">Order</th><th className="p-3">Eligible person</th><th className="p-3">Condition</th><th className="p-3">Completed by</th><th className="p-3">Signature</th></tr></thead>
+        <table className="w-full text-left text-sm"><thead className="bg-brand-bone"><tr><th className="p-3">Date</th><th className="p-3">Order</th><th className="p-3">Eligible person</th><th className="p-3">Condition</th><th className="p-3">Completed by</th><th className="p-3">Signature</th><th className="p-3">Receipt</th></tr></thead>
           <tbody>{items.map((d, i) => (
             <tr key={d.id} className={i % 2 ? "bg-brand-bone" : ""} data-testid={`vat-row-${d.order_reference}`}>
               <td className="p-3 whitespace-nowrap">{new Date(d.created_at).toLocaleDateString("en-GB")}</td>
@@ -474,6 +484,11 @@ function VatDeclarations() {
               <td className="p-3">{d.condition_description}</td>
               <td className="p-3">{d.completed_by_name || "—"}{d.relationship ? ` (${d.relationship})` : ""}</td>
               <td className="p-3">{d.signature}</td>
+              <td className="p-3 whitespace-nowrap">
+                <a href={`${base}/admin/vat-declarations/${d.id}/receipt.pdf`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-green font-semibold mr-3" data-testid={`vat-pdf-${d.order_reference}`}><FileText size={15} /> PDF</a>
+                <button onClick={() => emailReceipt(d)} className="inline-flex items-center gap-1 text-brand-terracotta font-semibold" data-testid={`vat-email-${d.order_reference}`}><Mail size={15} /> Email</button>
+                {d.receipt_emailed_at && <div className="text-xs text-[#4A4A4D] mt-1">Sent {new Date(d.receipt_emailed_at).toLocaleDateString("en-GB")}</div>}
+              </td>
             </tr>
           ))}</tbody>
         </table>
