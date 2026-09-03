@@ -109,6 +109,9 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 ## v3 round 12 (this session — 2026-06)
 - **Interactive dashboard**: date-range selector (defaults to **This month**, plus Last month, This/Last calendar year, All time, Custom dates) drives all tiles via `GET /admin/reports/summary?date_from&date_to`. Every tile is now **clickable** and opens a drill-down modal listing the records behind it via `GET /admin/reports/details?metric=&date_from&date_to` — money tiles → paid orders (date, ref, customer, ex-VAT, VAT, total), plus donations, refunds, zero-rated, items reused (order lines), event bookings, resource downloads (`at` field), email signups, and low stock. Range-aware metrics (orders, VAT, donations, items reused/carbon from paid-order lines in range); low stock is current-state. Verified: this-month filter, details endpoints (low stock → 6 rows), generic table renders.
 
+## v3 round 13 (this session — 2026-06)
+- **Period comparison on dashboard tiles**: `/admin/reports/summary` now also computes the equal-length previous period (when a date range is set) and returns `previous` + `previous_period`. Each tile shows a ▲/▼ % change vs the previous period (green up / terracotta down, "▲ new" when prior was zero, "no change" when both zero); omitted for "all time". Verified: Sep → prev Aug 2–31, all-time omits comparison, tiles render deltas (bookings/downloads/signups showed ▼100%).
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

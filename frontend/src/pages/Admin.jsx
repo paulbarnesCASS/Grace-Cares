@@ -127,20 +127,30 @@ function Dashboard() {
   };
 
   if (!s) return <div>Loading…</div>;
+  const money = (k) => gbp(s[k]);
   const stats = [
-    ["Total sales (inc VAT)", gbp(s.total_sales_inc_vat), "total_sales_inc_vat"],
-    ["Sales ex VAT", gbp(s.total_sales_ex_vat), "total_sales_ex_vat"],
-    ["VAT collected", gbp(s.total_vat), "total_vat"],
-    ["Zero-rated sales", gbp(s.zero_rated_sales), "zero_rated_sales"],
-    ["Donations", gbp(s.donations_total), "donations_total"],
-    ["Refunds", gbp(s.refunds_total), "refunds_total"],
-    ["Average order value", gbp(s.average_order_value), "orders"],
-    ["Orders", s.orders_count, "orders"],
-    ["Items reused", s.equipment_saved, "items_reused"],
-    ["Event bookings", s.event_bookings, "event_bookings"],
-    ["Resource downloads", s.resource_downloads, "resource_downloads"],
-    ["Email signups", s.email_signups, "email_signups"],
+    ["Total sales (inc VAT)", money("total_sales_inc_vat"), "total_sales_inc_vat", "total_sales_inc_vat"],
+    ["Sales ex VAT", money("total_sales_ex_vat"), "total_sales_ex_vat", "total_sales_ex_vat"],
+    ["VAT collected", money("total_vat"), "total_vat", "total_vat"],
+    ["Zero-rated sales", money("zero_rated_sales"), "zero_rated_sales", "zero_rated_sales"],
+    ["Donations", money("donations_total"), "donations_total", "donations_total"],
+    ["Refunds", money("refunds_total"), "refunds_total", "refunds_total"],
+    ["Average order value", money("average_order_value"), "orders", "average_order_value"],
+    ["Orders", s.orders_count, "orders", "orders_count"],
+    ["Items reused", s.equipment_saved, "items_reused", "equipment_saved"],
+    ["Event bookings", s.event_bookings, "event_bookings", "event_bookings"],
+    ["Resource downloads", s.resource_downloads, "resource_downloads", "resource_downloads"],
+    ["Email signups", s.email_signups, "email_signups", "email_signups"],
   ];
+  const renderDelta = (cmp) => {
+    if (!s.previous) return null;
+    const cur = s[cmp], prev = s.previous[cmp];
+    if (prev === 0 && cur === 0) return <span className="text-xs text-[#8C8C8C]">no change</span>;
+    if (prev === 0) return <span className="text-xs font-semibold text-[#1B5E20]">▲ new</span>;
+    const pct = ((cur - prev) / Math.abs(prev)) * 100;
+    const up = pct >= 0;
+    return <span className={`text-xs font-semibold ${up ? "text-[#1B5E20]" : "text-brand-terracotta"}`} title={`vs previous period`}>{up ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}% vs prev</span>;
+  };
   const periodLabel = from || to ? `${from || "start"} → ${to || "now"}` : "all time";
   return (
     <div data-testid="admin-dashboard">
@@ -170,10 +180,11 @@ function Dashboard() {
         <p className="text-sm text-[#4A4A4D] mt-2">Showing figures for: <strong>{periodLabel}</strong>. Click any tile to see the detail behind it.</p>
       </Card>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {stats.map(([l, v, m]) => (
-          <button key={l} onClick={() => openDetail(m, l)} className="text-left bg-white rounded-2xl border border-brand-border p-5 hover:border-brand-green hover:shadow-md transition-[border-color,box-shadow] cursor-pointer" data-testid={`dash-tile-${m}`}>
+        {stats.map(([l, v, m, cmp]) => (
+          <button key={l} onClick={() => openDetail(m, l)} className="text-left bg-white rounded-2xl border border-brand-border p-5 hover:border-brand-green hover:shadow-md transition-[border-color,box-shadow] cursor-pointer" data-testid={`dash-tile-${cmp}`}>
             <div className="text-3xl font-bold text-brand-terracotta font-heading">{v}</div>
             <div className="text-[#4A4A4D] mt-1 flex items-center gap-1">{l} <span className="text-brand-green text-xs">›</span></div>
+            <div className="mt-1" data-testid={`dash-delta-${cmp}`}>{renderDelta(cmp)}</div>
           </button>
         ))}
       </div>

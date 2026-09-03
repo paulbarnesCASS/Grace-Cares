@@ -24,9 +24,7 @@ def _range_on(field, date_from, date_to):
     return {field: q} if q else {}
 
 
-@admin_router.get("/admin/reports/summary")
-async def report_summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                         user=Depends(require_admin("finance_admin", "readonly", "shop_admin"))):
+async def _summary_metrics(date_from, date_to):
     rng = _range_on("created_at", date_from, date_to)
     order_q = {"payment_status": "paid", **rng}
     orders = await db.orders.find(order_q).to_list(5000)
@@ -77,6 +75,27 @@ async def report_summary(date_from: Optional[str] = None, date_to: Optional[str]
         "resource_downloads": downloads,
         "email_signups": subs,
     }
+
+
+COMPARE_KEYS = ["total_sales_inc_vat", "total_sales_ex_vat", "total_vat", "zero_rated_sales",
+                "donations_total", "refunds_total", "average_order_value", "orders_count",
+                "equipment_saved", "event_bookings", "resource_downloads", "email_signups"]
+
+
+@admin_router.get("/admin/reports/summary")
+async def report_summary(date_from: Optional[str] = None, date_to: Optional[str] = None,
+                         user=Depends(require_admin("finance_admin", "readonly", "shop_admin"))):
+    cur = await _summary_metrics(date_from, date_to)
+    if date_from and date_to:
+        from datetime import date as _date, timedelta as _td
+        f = _date.fromisoformat(date_from)
+        t = _date.fromisoformat(date_to)
+        span = (t - f).days + 1
+        pf, pt = (f - _td(days=span)).isoformat(), (f - _td(days=1)).isoformat()
+        prev = await _summary_metrics(pf, pt)
+        cur["previous"] = {k: prev[k] for k in COMPARE_KEYS}
+        cur["previous_period"] = {"date_from": pf, "date_to": pt}
+    return cur
 
 
 @admin_router.get("/admin/reports/details")
