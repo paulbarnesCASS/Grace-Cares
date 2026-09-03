@@ -1,0 +1,120 @@
+{
+  "theme_strategy": "Light mode primary to ensure optimal readability for older demographics and align with an eco-conscious, transparent brand identity. High contrast is non-negotiable.",
+  "typography": {
+    "instructions": "Use Atkinson Hyperlegible for all body and UI text due to its exceptional readability for visually impaired/older users. Use Outfit for headings to provide a warm, geometric, human-centric feel. Base font size should be large (text-lg).",
+    "fonts": {
+      "headings": "Outfit, sans-serif",
+      "body": "Atkinson Hyperlegible, sans-serif"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-[#144D36]",
+      "h2": "text-3xl md:text-4xl font-semibold tracking-tight text-[#144D36]",
+      "h3": "text-2xl md:text-3xl font-semibold text-[#1A1A1D]",
+      "h4": "text-xl md:text-2xl font-medium text-[#1A1A1D]",
+      "body": "text-lg leading-relaxed text-[#2D2D30]",
+      "small": "text-base text-[#4A4A4D]"
+    }
+  },
+  "colors": {
+    "primary": "#144D36",
+    "primary_hover": "#0F3A29",
+    "secondary": "#C85A40",
+    "secondary_hover": "#A94A33",
+    "background": "#F9F8F6",
+    "surface": "#FFFFFF",
+    "border": "#E2E0D8",
+    "text_primary": "#1A1A1D",
+    "text_secondary": "#4A4A4D",
+    "success_bg": "#E8F5E9",
+    "success_text": "#1B5E20",
+    "focus_ring": "#C85A40"
+  },
+  "visual_enhancers": {
+    "surface_strategy": "Flat Solid surfaces. NO Glassmorphism (it refracts data and reduces contrast, making it harder for older users). Cards should have white backgrounds with a subtle 1px border (#E2E0D8) and soft shadow (shadow-sm).",
+    "border_radius": "Rounded elements convey approachability. Use rounded-xl for cards, rounded-full for primary buttons, and rounded-2xl for large layout blocks.",
+    "spacing": "Generous spacing. Use p-6 or p-8 inside cards to avoid clutter. Gap between major sections should be py-16 or py-24."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#144D36] text-white rounded-full px-6 py-3 min-h-[48px] text-lg font-semibold hover:bg-[#0F3A29] transition-colors focus-visible:ring-4 focus-visible:ring-[#C85A40] focus-visible:ring-offset-2",
+      "secondary": "bg-[#C85A40] text-white rounded-full px-6 py-3 min-h-[48px] text-lg font-semibold hover:bg-[#A94A33] transition-colors focus-visible:ring-4 focus-visible:ring-[#144D36] focus-visible:ring-offset-2",
+      "outline": "bg-transparent border-2 border-[#144D36] text-[#144D36] rounded-full px-6 py-3 min-h-[48px] text-lg font-semibold hover:bg-[#144D36] hover:text-white transition-colors focus-visible:ring-4 focus-visible:ring-[#C85A40]"
+    },
+    "badges": {
+      "vat_relief": "inline-flex items-center px-3 py-1 rounded-full bg-[#E8F5E9] text-[#1B5E20] text-sm font-bold border border-[#A5D6A7]",
+      "condition": "inline-flex items-center px-3 py-1 rounded-full bg-[#FFF3E0] text-[#E65100] text-sm font-bold border border-[#FFCC80]"
+    },
+    "header": {
+      "background": "Solid white (#FFFFFF) with a 1px bottom border (#E2E0D8). DO NOT use transparent backgrounds as it harms legibility when scrolling.",
+      "navigation": "Desktop links must be clearly visible, large (text-lg), and have an underline on hover/focus. Include a prominent 'Donate' CTA."
+    },
+    "shop_grid": {
+      "layout": "Grid layout: 1 column mobile, 2 columns tablet, 3 columns desktop (gap-8).",
+      "card": "bg-white rounded-xl border border-[#E2E0D8] overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow",
+      "image_container": "aspect-square w-full bg-[#F9F8F6] relative border-b border-[#E2E0D8]",
+      "content": "p-5 flex flex-col flex-grow",
+      "title": "text-xl font-bold text-[#144D36] mb-2 line-clamp-2",
+      "price": "text-2xl font-bold text-[#1A1A1D] mb-3",
+      "action": "mt-auto w-full"
+    },
+    "forms": {
+      "inputs": "w-full rounded-lg border border-[#8C8C8C] bg-white px-4 py-3 min-h-[48px] text-lg text-[#1A1A1D] focus:border-[#144D36] focus:ring-2 focus:ring-[#144D36]",
+      "labels": "block text-lg font-semibold text-[#1A1A1D] mb-2",
+      "help_text": "text-base text-[#4A4A4D] mt-1"
+    }
+  },
+  "layouts": {
+    "homepage": {
+      "hero": "Warm, welcoming section. Split layout: Left side bold typography (H1: 'Making care sustainable') and plain English subtext. Right side: large, high-quality image of care community with rounded-2xl corners. Background: #F9F8F6.",
+      "four_routes": "Bento-style 2x2 grid (or 1x4 on mobile) representing the 4 core actions: Buy, Donate, Get Help, Sustainability. Each card needs a clear icon/image, large text, and a distinct CTA button.",
+      "impact_stats": "Large, high-contrast numeric counters (e.g., 'Items saved from landfill', 'Grants awarded') using the secondary color (#C85A40)."
+    },
+    "admin_dashboard": {
+      "sidebar": "bg-[#144D36] text-white, clear icons, large hit areas (min-h-[44px]).",
+      "content_area": "bg-[#F9F8F6] p-8",
+      "tables": "bg-white rounded-xl border border-[#E2E0D8], high contrast alternating row colors (white / #F9F8F6). Action buttons clearly visible."
+    }
+  },
+  "accessibility": {
+    "touch_targets": "All interactive elements must be at least 48x48 pixels.",
+    "focus_states": "Visible focus states are MANDATORY. Use focus-visible:ring-4 with a high-contrast color (e.g., focus-visible:ring-[#C85A40]).",
+    "color_contrast": "Ensure a minimum contrast ratio of 4.5:1 for text. Do not rely on color alone (e.g., add icons to error messages).",
+    "motion": "Respect prefers-reduced-motion. Avoid auto-playing carousels or heavy parallax. Keep transitions under 200ms.",
+    "language": "Use Plain English. Avoid jargon like 'Checkout Protocol'; use 'Secure Checkout' or 'Pay Now'."
+  },
+  "image_urls": {
+    "community_activities": {
+      "url": "https://images.unsplash.com/photo-1762955911769-d652ceaa94bb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwxfHxlbGRlcmx5JTIwY2FyZSUyMGNvbW11bml0eSUyMHNtaWxpbmd8ZW58MHx8fHwxNzg2Mzc2NDk1fDA&ixlib=rb-4.1.0&q=85",
+      "description": "Caregiver assisting two elderly women knitting, smiling.",
+      "category": "Hero / Impact / Community Events"
+    },
+    "mobility_equipment": {
+      "url": "https://images.unsplash.com/photo-1570793005299-c091be91bbad?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1NzZ8MHwxfHNlYXJjaHwxfHx3aGVlbGNoYWlyJTIwbW9iaWxpdHklMjBlcXVpcG1lbnR8ZW58MHx8fHwxNzg2Mzc2NDk1fDA&ixlib=rb-4.1.0&q=85",
+      "description": "Woman riding wheelchair near trees.",
+      "category": "Shop / Pre-loved Care Equipment"
+    },
+    "sustainability": {
+      "url": "https://images.unsplash.com/photo-1707129900844-484443dd3534?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTN8MHwxfHNlYXJjaHwzfHxzdXN0YWluYWJsZSUyMGdyZWVuJTIwaGFuZHMlMjBwbGFudHxlbnwwfHx8fDE3ODYzNzY0OTV8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Person holding a small plant in soil with their hands.",
+      "category": "Sustainability Support / Impact"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Use .js and .jsx files exclusively (no .tsx).",
+    "Include 'data-testid' attributes on ALL interactive and key informational elements for automated testing (e.g., data-testid='shop-now-btn').",
+    "Never use generic AI placeholder images; use the provided image URLs or standard clear lucide-react icons.",
+    "Do not use generic gradients or 'SaaS' purple/blue aesthetics. Stick strictly to the Forest Green (#144D36) and Terracotta (#C85A40) palette.",
+    "Implement the UI using Tailwind CSS and raw HTML where Shadcn components feel too rigid for marketing pages, but use Shadcn for forms, dialogs, and admin tables.",
+    "Ensure all fonts are imported correctly (Atkinson Hyperlegible and Outfit) and applied via Tailwind configuration.",
+    "Always use 'lucide-react' for icons. Ensure icons are large and recognizable (e.g., size={24} or size={28})."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Create depth through layered design elements (borders + soft shadows), NOT heavy box-shadows or dark gradients.",
+    "You MUST NOT apply universal transition (e.g., transition: all). Add transitions for specific properties.",
+    "You MUST NOT center align the app container. Do not disrupt the natural left-to-right reading flow.",
+    "Never use AI assistant Emoji characters (🤖🧠💡) for icons.",
+    "Use 2x spacing compared to standard defaults. Cramped designs fail accessibility standards for older adults.",
+    "Use 'sonner' for toasts notifications."
+  ]
+}

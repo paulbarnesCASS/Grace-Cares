@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 40 20% 98%;
+  --foreground: 240 3% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 3% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 3% 10%;
+  --primary: 154 58% 19%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 12 55% 52%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 40 15% 94%;
+  --muted-foreground: 240 3% 35%;
+  --accent: 40 15% 92%;
+  --accent-foreground: 240 3% 10%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 42 18% 87%;
+  --input: 0 0% 55%;
+  --ring: 12 55% 52%;
+  --radius: 0.75rem;
+  --chart-1: 154 58% 25%;
+  --chart-2: 12 55% 52%;
+  --chart-3: 40 60% 55%;
+  --chart-4: 197 37% 34%;
+  --chart-5: 173 40% 40%;
+}
+
+* { border-color: hsl(var(--border)); }
+
+body {
+  margin: 0;
+  font-family: "Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #F9F8F6;
+  color: #1A1A1D;
+  -webkit-font-smoothing: antialiased;
+  font-size: 1.125rem;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, h5, .font-heading { font-family: "Outfit", sans-serif; }
+
+::selection { background: #006738; color: #fff; }
+
+*:focus-visible {
+  outline: 3px solid #006738;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+.gc-container { max-width: 1200px; margin: 0 auto; padding-left: 1.25rem; padding-right: 1.25rem; }
