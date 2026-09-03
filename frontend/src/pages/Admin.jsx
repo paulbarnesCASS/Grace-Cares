@@ -159,6 +159,33 @@ function Products() {
   const [impFile, setImpFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [showExport, setShowExport] = useState(false);
+  const [expCat, setExpCat] = useState("");
+  const [expStock, setExpStock] = useState("");
+  const [expFrom, setExpFrom] = useState("");
+  const [expTo, setExpTo] = useState("");
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const exportUrl = () => {
+    const qs = new URLSearchParams();
+    if (expCat) qs.set("category", expCat);
+    if (expStock) qs.set("stock_status", expStock);
+    if (expFrom) qs.set("date_from", expFrom);
+    if (expTo) qs.set("date_to", expTo);
+    const q = qs.toString();
+    return `${base}/admin/products-export.csv${q ? `?${q}` : ""}`;
+  };
+  const uploadOneImage = async (fileObj) => {
+    if (!fileObj) return;
+    setUploadingImg(true);
+    const fd = new FormData(); fd.append("file", fileObj);
+    try {
+      const r = await api.post("/admin/products/upload-image", fd);
+      const current = typeof edit.images === "string" ? edit.images.split(",").map((s) => s.trim()).filter(Boolean) : (edit.images || []);
+      setEdit({ ...edit, images: [...current, r.data.url].join(", ") });
+      toast.success("Photo uploaded");
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setUploadingImg(false); }
+  };
   const uploadFile = async (dry) => {
     if (!impFile) return toast.error("Choose a .xlsx or .csv file first");
     const fd = new FormData(); fd.append("file", impFile);
@@ -196,11 +223,26 @@ function Products() {
         <H>Products</H>
         <div className="flex gap-2 flex-wrap">
           <a href={`${base}/admin/product-template.csv`} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2.5 font-semibold" data-testid="download-template"><Download size={18} /> Template</a>
-          <a href={`${base}/admin/products-export.csv`} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2.5 font-semibold" data-testid="export-products"><Download size={18} /> Export CSV</a>
+          <button onClick={() => setShowExport(!showExport)} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2.5 font-semibold" data-testid="toggle-export"><Download size={18} /> Export CSV</button>
           <button onClick={() => setShowImport(!showImport)} className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2.5 font-semibold" data-testid="toggle-import"><ClipboardList size={18} /> Import CSV</button>
           <button onClick={() => setEdit({ ...EMPTY_PRODUCT })} className="inline-flex items-center gap-2 bg-brand-terracotta text-white rounded-full px-5 py-2.5 font-semibold" data-testid="add-product-btn"><Plus size={18} /> Add product</button>
         </div>
       </div>
+      {showExport && (
+        <Card className="mb-6" >
+          <label className="font-semibold block mb-2">Choose what to export — leave blank for everything</label>
+          <div className="grid sm:grid-cols-4 gap-3">
+            <div><label className="text-sm font-semibold block mb-1">Category</label><select className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" value={expCat} onChange={(e) => setExpCat(e.target.value)} data-testid="export-category"><option value="">All categories</option>{cats.map((c) => <option key={c.id} value={c.slug || c.id}>{c.name}</option>)}</select></div>
+            <div><label className="text-sm font-semibold block mb-1">Stock status</label><select className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" value={expStock} onChange={(e) => setExpStock(e.target.value)} data-testid="export-stock"><option value="">All stock</option><option value="in_stock">In stock</option><option value="low_stock">Low stock (≤1)</option><option value="out_of_stock">Out of stock</option></select></div>
+            <div><label className="text-sm font-semibold block mb-1">Created from</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={expFrom} onChange={(e) => setExpFrom(e.target.value)} data-testid="export-from" /></div>
+            <div><label className="text-sm font-semibold block mb-1">Created to</label><input type="date" className="w-full rounded-lg border border-[#8C8C8C] px-3 py-2" value={expTo} onChange={(e) => setExpTo(e.target.value)} data-testid="export-to" /></div>
+          </div>
+          <div className="flex gap-3 mt-4 flex-wrap">
+            <a href={exportUrl()} className="inline-flex items-center gap-2 bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="export-download"><Download size={18} /> Download CSV</a>
+            <button onClick={() => { setExpCat(""); setExpStock(""); setExpFrom(""); setExpTo(""); }} className="border-2 border-brand-green text-brand-green rounded-full px-5 py-2.5 font-semibold" data-testid="export-clear">Clear filters</button>
+          </div>
+        </Card>
+      )}
       {showImport && (
         <Card className="mb-6" >
           <label className="font-semibold block mb-1">Paste product CSV (match the template columns; rows are matched/updated by SKU)</label>
@@ -263,7 +305,15 @@ function Products() {
               <div><label className="font-semibold">Carbon saving (kg)</label><input type="number" step="0.1" className={input} value={edit.carbon_saving_kg} onChange={(e) => setEdit({ ...edit, carbon_saving_kg: e.target.value })} /></div>
               <div><label className="font-semibold">Weight (kg) — for postage</label><input type="number" step="0.1" className={input} value={edit.weight_kg} onChange={(e) => setEdit({ ...edit, weight_kg: e.target.value })} data-testid="pm-weight" /></div>
               <div><label className="font-semibold">Fulfilment route</label><select className={`${input} bg-white`} value={edit.fulfilment_route} onChange={(e) => setEdit({ ...edit, fulfilment_route: e.target.value })} data-testid="pm-route"><option value="postable">Postable</option><option value="hub_collection">Hub collection</option><option value="bulky_delivery">Bulky delivery</option></select></div>
-              <div className="sm:col-span-2"><label className="font-semibold">Image URLs (comma separated)</label><input className={input} value={edit.images} onChange={(e) => setEdit({ ...edit, images: e.target.value })} data-testid="pm-images" /></div>
+              <div className="sm:col-span-2"><label className="font-semibold">Image URLs (comma separated)</label><input className={input} value={edit.images} onChange={(e) => setEdit({ ...edit, images: e.target.value })} data-testid="pm-images" />
+                <div className="mt-2 flex items-center gap-3">
+                  <label className="inline-flex items-center gap-2 border-2 border-brand-green text-brand-green rounded-full px-4 py-2 font-semibold cursor-pointer text-sm" data-testid="pm-upload-image-label">
+                    <input type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" data-testid="pm-upload-image" onChange={(e) => { uploadOneImage(e.target.files[0]); e.target.value = ""; }} />
+                    {uploadingImg ? "Uploading…" : "Upload a photo"}
+                  </label>
+                  <span className="text-sm text-[#4A4A4D]">Uploads to storage and adds the link above.</span>
+                </div>
+              </div>
               <div className="sm:col-span-2"><label className="font-semibold">Description</label><textarea rows={3} className={input} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></div>
               <div><label className="font-semibold">Dimensions</label><input className={input} value={edit.dimensions} onChange={(e) => setEdit({ ...edit, dimensions: e.target.value })} /></div>
               <div><label className="font-semibold">Max user weight</label><input className={input} value={edit.max_user_weight} onChange={(e) => setEdit({ ...edit, max_user_weight: e.target.value })} /></div>

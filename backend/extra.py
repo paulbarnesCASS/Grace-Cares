@@ -19,6 +19,7 @@ from bson import ObjectId
 from core import db, now_utc, clean, cleans
 from auth import require_admin
 from shop import log_audit, DEFAULT_BANDS, notify_admins
+from storage import upload_image, get_object
 
 extra_router = APIRouter(prefix="/api")
 SITE = os.environ.get("FRONTEND_URL", "https://grace-cares.com").rstrip("/")
@@ -248,10 +249,45 @@ async def product_template(user=Depends(require_admin("shop_admin", "product_con
 
 
 @extra_router.get("/admin/products-export.csv")
-async def product_export(user=Depends(require_admin("shop_admin", "product_approver"))):
+async def product_export(
+    category: Optional[str] = None,
+    stock_status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    user=Depends(require_admin("shop_admin", "product_approver")),
+):
+    from datetime import datetime as _dt, timezone as _tz
     cats = {str(c["_id"]): c.get("slug", "") for c in await db.categories.find().to_list(200)}
+    query = {}
+    if category:  # accept slug or category_id
+        cid = category
+        if not ObjectId.is_valid(category):
+            slug_map = {c.get("slug"): str(c["_id"]) for c in await db.categories.find().to_list(200)}
+            cid = slug_map.get(category)
+        if cid:
+            query["category_id"] = cid
+    if date_from or date_to:
+        rng = {}
+        if date_from:
+            rng["$gte"] = _dt.fromisoformat(date_from).replace(tzinfo=_tz.utc)
+        if date_to:
+            rng["$lte"] = _dt.fromisoformat(date_to).replace(hour=23, minute=59, second=59, tzinfo=_tz.utc)
+        query["created_at"] = rng
+
+    def _in_stock_filter(p):
+        avail = (p.get("quantity_available", 0) or 0) - (p.get("quantity_reserved", 0) or 0)
+        if stock_status == "in_stock":
+            return avail > 0
+        if stock_status == "out_of_stock":
+            return avail <= 0
+        if stock_status == "low_stock":
+            return 0 < avail <= 1
+        return True
+
     rows = []
-    for p in await db.products.find().sort("created_at", -1).to_list(5000):
+    for p in await db.products.find(query).sort("created_at", -1).to_list(5000):
+        if not _in_stock_filter(p):
+            continue
         rows.append([
             p.get("name", ""), p.get("sku", ""), cats.get(p.get("category_id"), ""),
             p.get("description", ""), p.get("condition", ""), p.get("price_ex_vat", 0),
@@ -430,8 +466,11 @@ async def import_photos(file: UploadFile = File(...), user=Depends(require_admin
                 unmatched.append(base)
                 continue
             ext = os.path.splitext(base)[1].lower().lstrip(".")
-            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
-            url = f"data:{mime};base64," + base64.b64encode(zf.read(nm)).decode()
+            try:
+                url = upload_image(zf.read(nm), ext)
+            except Exception as e:
+                unmatched.append(f"{base} (upload failed: {e})")
+                continue
             imgs = prod.get("images", [])
             if url not in imgs:
                 imgs = imgs + [url]
@@ -439,6 +478,33 @@ async def import_photos(file: UploadFile = File(...), user=Depends(require_admin
             matched.append(f"{prod['sku']} ← {base}")
     await log_audit(user, "import_photos", "products", after={"matched": len(matched)})
     return {"ok": True, "matched": matched, "unmatched": unmatched, "matched_count": len(matched)}
+
+
+@extra_router.post("/admin/products/upload-image")
+async def upload_product_image(file: UploadFile = File(...),
+                               user=Depends(require_admin("shop_admin", "product_contributor", "product_approver"))):
+    """Upload a single product photo to object storage; returns a served URL."""
+    if not (file.filename or "").lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        raise HTTPException(400, "Please upload a .jpg, .png or .webp image")
+    content = await file.read()
+    ext = os.path.splitext(file.filename)[1].lstrip(".")
+    try:
+        url = upload_image(content, ext)
+    except Exception as e:
+        raise HTTPException(502, f"Image upload failed: {e}")
+    await log_audit(user, "upload_image", "products", after={"url": url})
+    return {"ok": True, "url": url}
+
+
+@extra_router.get("/files/{path:path}")
+async def serve_file(path: str):
+    """Public passthrough for product images stored in object storage."""
+    try:
+        data, content_type = get_object(path)
+    except Exception:
+        raise HTTPException(404, "File not found")
+    return Response(content=data, media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=31536000"})
 
 
 async def _run_weekly_export():

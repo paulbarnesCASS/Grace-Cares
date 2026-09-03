@@ -77,6 +77,10 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Bulk photo import**: `/api/admin/products/import-photos` accepts a `.zip`, matches images to products by SKU (full stem or prefix), stored as base64 data URLs (deploy-safe, no pod-local files).
 - **Scheduled weekly export**: `.emergent/crons.yml` → Monday 08:00 UTC POST `/api/cron/weekly-product-export` (Bearer `WEBHOOK_CRON_SECRET`), builds the product+stock CSV and MOCK-emails admins; logged to `export_runs`. Verified: 401 without token, 200 with, dry-run writes nothing, xlsx round-trip creates/updates by SKU.
 
+## v3 round 5 (this session — 2026-06)
+- **Object Storage for photos**: integrated Emergent Object Storage (`/app/backend/storage.py`). Bulk zip photo import (`/api/admin/products/import-photos`) and a NEW single-photo upload on the product edit form (`/api/admin/products/upload-image`) now push image bytes to the bucket and store a served URL (`/api/files/{path}`) instead of base64 — ends MongoDB document bloat. Images served via public passthrough endpoint with long cache headers. Verified: upload returns URL, served file is image/png.
+- **Product export filters**: `/api/admin/products-export.csv` accepts `category` (slug or id), `stock_status` (in_stock/low_stock/out_of_stock), `date_from`, `date_to`. Admin → Products has an "Export CSV" filter panel. Verified: category=mobility → 4 rows, date_to=2020 → header only, stock filters apply.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.
