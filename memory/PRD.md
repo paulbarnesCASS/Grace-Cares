@@ -91,6 +91,12 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 ## v3 round 8 (this session — 2026-06)
 - **Order detail view**: Admin → Orders rows are now clickable (plus a "View" button) opening a detail modal showing status/payment/Xero, customer contact + address, fulfilment + delivery questionnaire, VAT-relief flag, itemised line table (with per-line relief marker), totals breakdown, delivery quote, and refund history. Added inline **status update** dropdown (uses existing `PUT /api/admin/orders/{id}/status`). Refund + delivery-quote actions available from the modal. Frontend-only; no backend change (list endpoint already returns full docs). Verified via screenshot.
 
+## v3 round 9 (this session — 2026-06)
+- **Order search & filter**: Admin → Orders has a live search box (reference / customer name / email) and a status dropdown; shows "X of Y orders". Client-side over the loaded list.
+- **Order activity timeline**: order detail modal now shows a dated trail — placed (`created_at`), payment received (`paid_at`), each status change, delivery quote set/paid, and refunds. `PUT /api/admin/orders/{id}/status` now appends `{status, at, by, note}` to a `status_history` array on the order.
+- **Relief totals in declarations report**: `/admin/vat-declarations` list and `vat-declarations-export.csv` now include `order_total_paid` and `total_vat_relieved` (VAT that would have applied to relieved lines = 20% × ex-VAT). Verified £5.60 on a £28 order.
+- **Clickable declaration from an order**: if an order claimed relief, the modal shows "view declaration" which opens a popup layered over the order (`GET /api/admin/vat-declarations/{id}`) with the full declaration, relieved-item breakdown, and total relieved.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

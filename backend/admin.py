@@ -157,17 +157,62 @@ def _parse_range(date_from, date_to):
     return {"created_at": q} if q else {}
 
 
+RELIEF_RATE = 0.20  # standard VAT rate that would otherwise apply to relieved items
+
+
+def _order_relief(order):
+    """VAT that would have been charged on relieved lines = the relief granted."""
+    relieved = 0.0
+    for it in (order or {}).get("items", []):
+        if it.get("vat_relief_applied"):
+            relieved += round((it.get("line_ex_vat", 0) or 0) * RELIEF_RATE, 2)
+    return round(relieved, 2)
+
+
+async def _orders_by_ref(refs):
+    refs = [r for r in refs if r]
+    docs = await db.orders.find({"reference": {"$in": refs}}).to_list(len(refs) or 1)
+    return {o["reference"]: o for o in docs}
+
+
 @admin_router.get("/admin/vat-declarations")
 async def vat_declarations(date_from: Optional[str] = None, date_to: Optional[str] = None,
                            user=Depends(require_admin("finance_admin"))):
     query = _parse_range(date_from, date_to)
     docs = await db.vat_declarations.find(query).sort("created_at", -1).to_list(2000)
-    return cleans(docs)
+    omap = await _orders_by_ref([d.get("order_reference") for d in docs])
+    out = []
+    for d in docs:
+        c = clean(d)
+        o = omap.get(d.get("order_reference"))
+        c["total_vat_relieved"] = _order_relief(o)
+        c["order_total_paid"] = (o or {}).get("totals", {}).get("total_payable")
+        out.append(c)
+    return out
+
+
+@admin_router.get("/admin/vat-declarations/{did}")
+async def vat_declaration_detail(did: str, user=Depends(require_admin("finance_admin"))):
+    d = await db.vat_declarations.find_one({"_id": ObjectId(did)})
+    if not d:
+        raise HTTPException(404, "Declaration not found")
+    o = await db.orders.find_one({"reference": d.get("order_reference")})
+    c = clean(d)
+    c["total_vat_relieved"] = _order_relief(o)
+    c["order_total_paid"] = (o or {}).get("totals", {}).get("total_payable")
+    c["relieved_items"] = [
+        {"name": it.get("name"), "sku": it.get("sku"), "quantity": it.get("quantity"),
+         "line_ex_vat": it.get("line_ex_vat"),
+         "vat_relieved": round((it.get("line_ex_vat", 0) or 0) * RELIEF_RATE, 2)}
+        for it in (o or {}).get("items", []) if it.get("vat_relief_applied")
+    ]
+    return c
 
 
 VAT_EXPORT_COLUMNS = ["created_at", "order_reference", "customer_email", "eligible_person_name",
                       "eligible_person_address", "condition_description", "for_personal_domestic_use",
-                      "completed_by_name", "relationship", "info_accurate", "signature"]
+                      "completed_by_name", "relationship", "info_accurate", "signature",
+                      "order_total_paid", "total_vat_relieved"]
 
 
 @admin_router.get("/admin/vat-declarations-export.csv")
@@ -175,17 +220,20 @@ async def vat_declarations_export(date_from: Optional[str] = None, date_to: Opti
                                   user=Depends(require_admin("finance_admin"))):
     query = _parse_range(date_from, date_to)
     docs = await db.vat_declarations.find(query).sort("created_at", -1).to_list(5000)
+    omap = await _orders_by_ref([d.get("order_reference") for d in docs])
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(VAT_EXPORT_COLUMNS)
     for d in docs:
         ca = d.get("created_at")
+        o = omap.get(d.get("order_reference"))
         w.writerow([ca.isoformat() if hasattr(ca, "isoformat") else (ca or ""),
                     d.get("order_reference", ""), d.get("customer_email", ""),
                     d.get("eligible_person_name", ""), d.get("eligible_person_address", ""),
                     d.get("condition_description", ""), d.get("for_personal_domestic_use", ""),
                     d.get("completed_by_name", ""), d.get("relationship", ""),
-                    d.get("info_accurate", ""), d.get("signature", "")])
+                    d.get("info_accurate", ""), d.get("signature", ""),
+                    (o or {}).get("totals", {}).get("total_payable", ""), _order_relief(o)])
     fn = "vat-declarations"
     if date_from or date_to:
         fn += f"_{date_from or 'start'}_to_{date_to or 'now'}"

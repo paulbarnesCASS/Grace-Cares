@@ -335,8 +335,34 @@ const ORDER_STATUSES = ["pending_payment", "paid", "processing", "ready_for_coll
 function Orders() {
   const [orders, setOrders] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [declView, setDeclView] = useState(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const load = () => api.get("/admin/orders").then((r) => setOrders(r.data));
   useEffect(() => { load(); }, []);
+  const filtered = orders.filter((o) => {
+    if (statusFilter !== "all" && o.status !== statusFilter) return false;
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return (o.reference || "").toLowerCase().includes(q) ||
+           (o.customer?.name || "").toLowerCase().includes(q) ||
+           (o.customer?.email || "").toLowerCase().includes(q);
+  });
+  const buildTimeline = (o) => {
+    const ev = [];
+    if (o.created_at) ev.push(["Order placed", o.created_at, "#006738"]);
+    if (o.paid_at) ev.push(["Payment received", o.paid_at, "#1B5E20"]);
+    (o.status_history || []).forEach((h) => ev.push([`Marked "${(h.status || "").replace(/_/g, " ")}"${h.by ? ` · ${h.by}` : ""}`, h.at, "#006738"]));
+    if (o.delivery_quote?.at) ev.push([`Delivery quote set (${gbp(o.delivery_quote.amount)})`, o.delivery_quote.at, "#006738"]);
+    if (o.delivery_quote?.paid_at) ev.push(["Delivery paid", o.delivery_quote.paid_at, "#1B5E20"]);
+    (o.refunds || []).forEach((r) => ev.push([`Refunded ${gbp(r.amount)}${r.by ? ` · ${r.by}` : ""}`, r.at, "#C85A40"]));
+    return ev.filter(([, t]) => t).sort((a, b) => new Date(a[1]) - new Date(b[1]));
+  };
+  const openDecl = async (id) => {
+    if (!id) return;
+    try { const r = await api.get(`/admin/vat-declarations/${id}`); setDeclView(r.data); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
   const quote = async (o) => {
     const a = window.prompt(`Delivery quote (£) for bulky order ${o.reference}:`);
     if (!a) return;
@@ -364,9 +390,17 @@ function Orders() {
   return (
     <div data-testid="admin-orders">
       <H>Orders</H>
+      <div className="flex gap-3 flex-wrap mb-4">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search reference, name or email…" className="flex-1 min-w-[240px] rounded-full border border-[#8C8C8C] px-4 py-2.5" data-testid="order-search" />
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="rounded-full border border-[#8C8C8C] px-4 py-2.5 bg-white" data-testid="order-status-filter">
+          <option value="all">All statuses</option>
+          {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
+        </select>
+      </div>
+      <p className="text-sm text-[#4A4A4D] mb-2" data-testid="order-count">{filtered.length} of {orders.length} orders</p>
       <Card className="overflow-x-auto p-0">
         <table className="w-full text-left"><thead className="bg-brand-bone"><tr><th className="p-3">Ref</th><th className="p-3">Customer</th><th className="p-3">Total</th><th className="p-3">Status</th><th className="p-3">Xero</th><th className="p-3"></th></tr></thead>
-          <tbody>{orders.map((o, i) => (
+          <tbody>{filtered.map((o, i) => (
             <tr key={o.id} className={`${i % 2 ? "bg-brand-bone" : ""} cursor-pointer hover:bg-brand-lime/20`} onClick={() => setSelected(o)} data-testid={`order-row-${o.reference}`}>
               <td className="p-3 font-semibold text-brand-green underline">{o.reference}</td><td className="p-3">{o.customer?.name}</td><td className="p-3">{gbp(o.totals?.total_payable)}</td>
               <td className="p-3">{o.status}</td><td className="p-3">{o.xero_sync_status}</td>
@@ -422,7 +456,9 @@ function Orders() {
                     {Object.entries(selected.delivery_questionnaire).map(([k, v]) => v ? <div key={k}><span className="capitalize">{k.replace(/_/g, " ")}</span>: {String(v)}</div> : null)}
                   </div>
                 )}
-                {selected.vat_relief_claim && <p className="text-[#1B5E20] font-semibold text-sm mt-2">✓ VAT relief claimed (see VAT Declarations)</p>}
+                {selected.vat_relief_claim && (selected.declaration_id
+                  ? <button onClick={() => openDecl(selected.declaration_id)} className="text-[#1B5E20] font-semibold text-sm mt-2 underline inline-flex items-center gap-1" data-testid="order-view-declaration"><ShieldCheck size={15} /> ✓ VAT relief claimed — view declaration</button>
+                  : <p className="text-[#1B5E20] font-semibold text-sm mt-2">✓ VAT relief claimed</p>)}
                 {selected.marketing_consent && <p className="text-[#4A4A4D] text-sm">Opted in to marketing</p>}
               </div>
             </div>
@@ -448,6 +484,19 @@ function Orders() {
               <div className="flex justify-between border-t border-brand-green mt-1 pt-1 font-bold text-brand-green"><span>Total paid</span><span>{gbp(selected.totals?.total_payable)}</span></div>
             </div>
 
+            <div className="border border-brand-border rounded-xl p-4 mb-4" data-testid="order-timeline">
+              <h3 className="font-bold text-brand-green mb-3">Activity timeline</h3>
+              <ol className="space-y-3">
+                {buildTimeline(selected).map(([label, at, color], idx) => (
+                  <li key={idx} className="flex gap-3">
+                    <span className="mt-1.5 h-2.5 w-2.5 rounded-full shrink-0" style={{ background: color }} />
+                    <div><div className="text-[#2D2D30] text-sm font-semibold">{label}</div><div className="text-[#4A4A4D] text-xs">{dt(at)}</div></div>
+                  </li>
+                ))}
+                {buildTimeline(selected).length === 0 && <li className="text-[#4A4A4D] text-sm">No activity recorded yet.</li>}
+              </ol>
+            </div>
+
             {selected.delivery_quote && (
               <div className="border border-brand-border rounded-xl p-4 mb-4">
                 <h3 className="font-bold text-brand-green mb-1">Delivery quote</h3>
@@ -465,6 +514,46 @@ function Orders() {
               {selected.payment_status === "paid" && selected.status !== "refunded" && <button onClick={() => refund(selected)} className="border-2 border-brand-terracotta text-brand-terracotta rounded-full px-6 py-2.5 font-semibold" data-testid="order-refund-btn">Refund</button>}
               {selected.fulfilment === "bulky_delivery" && selected.delivery_quote?.status !== "paid" && <button onClick={() => quote(selected)} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold">Set delivery quote</button>}
               <button onClick={() => setSelected(null)} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold ml-auto">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {declView && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-[60] overflow-auto" onClick={() => setDeclView(null)}>
+          <div className="bg-white rounded-2xl p-7 max-w-xl w-full my-8 max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()} data-testid="declaration-popup">
+            <div className="flex justify-between items-start mb-4">
+              <h2 className="font-heading text-2xl font-bold text-brand-green flex items-center gap-2"><ShieldCheck size={22} /> VAT relief declaration</h2>
+              <button onClick={() => setDeclView(null)} className="text-2xl leading-none text-[#4A4A4D] px-2" data-testid="declaration-close">×</button>
+            </div>
+            <div className="space-y-2 text-[#2D2D30]">
+              {[["Order", declView.order_reference], ["Declared on", dt(declView.created_at)],
+                ["Eligible person", declView.eligible_person_name], ["Address", declView.eligible_person_address],
+                ["Disability / long-term illness", declView.condition_description],
+                ["Completed by", declView.completed_by_name ? `${declView.completed_by_name}${declView.relationship ? ` (${declView.relationship})` : ""}` : "The eligible person"],
+                ["For personal/domestic use", declView.for_personal_domestic_use ? "Yes" : "No"],
+                ["Information declared accurate", declView.info_accurate ? "Yes" : "No"],
+                ["Signature", declView.signature]].map(([l, v]) => (
+                <div key={l} className="grid grid-cols-[180px_1fr] gap-2 border-b border-brand-border pb-1.5">
+                  <span className="font-semibold text-brand-green text-sm">{l}</span><span className="text-sm">{v || "—"}</span>
+                </div>
+              ))}
+            </div>
+            {declView.relieved_items?.length > 0 && (
+              <div className="mt-4">
+                <h3 className="font-bold text-brand-green mb-2">Items with relief applied</h3>
+                <div className="overflow-x-auto border border-brand-border rounded-xl">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-brand-bone"><tr><th className="p-2">Item</th><th className="p-2">Qty</th><th className="p-2">Ex VAT</th><th className="p-2">VAT relieved</th></tr></thead>
+                    <tbody>{declView.relieved_items.map((it, idx) => (
+                      <tr key={idx} className={idx % 2 ? "bg-brand-bone" : ""}><td className="p-2">{it.name}</td><td className="p-2">{it.quantity}</td><td className="p-2">{gbp(it.line_ex_vat)}</td><td className="p-2">{gbp(it.vat_relieved)}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            <div className="bg-brand-bone rounded-xl p-4 mt-4 flex justify-between font-bold text-brand-green">
+              <span>Total VAT relieved</span><span data-testid="declaration-relief-total">{gbp(declView.total_vat_relieved)}</span>
             </div>
           </div>
         </div>

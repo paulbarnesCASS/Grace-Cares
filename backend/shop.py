@@ -666,7 +666,10 @@ class OrderStatusBody(BaseModel):
 @shop_router.put("/admin/orders/{oid}/status")
 async def update_order_status(oid: str, body: OrderStatusBody, user=Depends(require_admin("shop_admin"))):
     o = await db.orders.find_one({"_id": ObjectId(oid)})
-    await db.orders.update_one({"_id": ObjectId(oid)}, {"$set": {"status": body.status}})
+    await db.orders.update_one({"_id": ObjectId(oid)},
+        {"$set": {"status": body.status},
+         "$push": {"status_history": {"status": body.status, "at": now_utc(),
+                                      "by": user["email"], "note": body.note}}})
     await log_audit(user, "update_status", "order", oid, {"status": o.get("status")}, {"status": body.status})
     return {"ok": True}
 
