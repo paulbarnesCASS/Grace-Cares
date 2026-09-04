@@ -143,6 +143,9 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Editable section permissions**: a super admin can now set which roles see which sections from Users & Roles (a "Section access by role" checkbox matrix). Stored in `site_settings.section_permissions`; the sidebar `canAccess()` loads it live (`GET/PUT /admin/section-permissions`, PUT is super_admin-only), falling back to code defaults. Users & Roles stays super-admin-only. Verified: GET returns 14 sections, PUT saves/reset, matrix renders.
 - **Event booking reminders**: new editable `booking_reminder` email template; a daily cron (`/api/cron/booking-reminders`, 9am UTC in `.emergent/crons.yml`, bearer-secret auth, background task) emails everyone with a confirmed booking for an event starting the next day, marking `reminder_sent` to avoid duplicates. Verified: cron 200 with auth / 401 without; template present (7 total).
 
+## v3 round 22 (this session — 2026-06)
+- **Per-event reminder timing**: each event now chooses how far ahead its booking reminder is sent (1/2/3/5/7/14 days) via a "Reminder email timing" dropdown in the Admin → Events form (`reminder_days_before`, default 1). Backend cron `_send_booking_reminders` fires when `start_at.date() − today == reminder_days_before` (falls back to 1 for events without the field). Verified end-to-end: PUT persisted `reminder_days_before=3`; UI dropdown renders and binds.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

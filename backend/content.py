@@ -196,6 +196,7 @@ class EventBody(BaseModel):
     cancelled: bool = False
     contact: Optional[str] = ""
     published: bool = True
+    reminder_days_before: int = 1
 
 
 def public_event(e: dict) -> dict:
@@ -252,15 +253,16 @@ async def delete_event(eid: str, user=Depends(require_admin("events_admin"))):
 
 
 async def _send_booking_reminders():
-    from datetime import datetime, timezone, timedelta
-    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).date()
     sent = 0
     for e in await db.events.find({"cancelled": {"$ne": True}}).to_list(1000):
         try:
             d = datetime.fromisoformat(str(e.get("start_at", "")).replace("Z", "+00:00"))
         except Exception:
             continue
-        if d.date() != tomorrow:
+        days_before = int(e.get("reminder_days_before", 1) or 1)
+        if (d.date() - today).days != days_before:
             continue
         bookings = await db.event_bookings.find({"event_id": str(e["_id"]), "status": "confirmed",
                                                  "reminder_sent": {"$ne": True}}).to_list(2000)

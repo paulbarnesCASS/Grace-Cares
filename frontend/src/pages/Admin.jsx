@@ -1017,7 +1017,7 @@ function EquipmentDonations() {
   );
 }
 
-const EMPTY_EVENT = { name: "", slug: "", description: "", image: "", start_at: "", venue: "", online_link: "", accessibility_info: "", capacity: 20, is_paid: false, price: 0, published: true, cancelled: false };
+const EMPTY_EVENT = { name: "", slug: "", description: "", image: "", start_at: "", venue: "", online_link: "", accessibility_info: "", capacity: 20, is_paid: false, price: 0, published: true, cancelled: false, reminder_days_before: 1 };
 function EventsAdmin() {
   const [events, setEvents] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -1025,7 +1025,7 @@ function EventsAdmin() {
   const load = () => api.get("/events").then((r) => setEvents(r.data));
   useEffect(() => { load(); api.get("/admin/bookings").then((r) => setBookings(r.data)); }, []);
   const save = async () => {
-    const body = { ...edit, capacity: Number(edit.capacity), price: Number(edit.price) };
+    const body = { ...edit, capacity: Number(edit.capacity), price: Number(edit.price), reminder_days_before: Number(edit.reminder_days_before ?? 1) };
     try { if (edit.id) await api.put(`/events/${edit.id}`, body); else await api.post("/events", body); toast.success("Saved"); setEdit(null); load(); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
@@ -1050,6 +1050,7 @@ function EventsAdmin() {
               <div><label className="font-semibold">Venue</label><input className={input} value={edit.venue} onChange={(e) => setEdit({ ...edit, venue: e.target.value })} /></div>
               <div><label className="font-semibold">Capacity</label><input type="number" className={input} value={edit.capacity} onChange={(e) => setEdit({ ...edit, capacity: e.target.value })} /></div>
               <div><label className="font-semibold">Price (£)</label><input type="number" step="0.01" className={input} value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></div>
+              <div className="sm:col-span-2"><label className="font-semibold">Reminder email timing</label><select className={input} value={edit.reminder_days_before ?? 1} onChange={(e) => setEdit({ ...edit, reminder_days_before: Number(e.target.value) })} data-testid="em-reminder-days"><option value={1}>1 day before</option><option value={2}>2 days before</option><option value={3}>3 days before</option><option value={5}>5 days before</option><option value={7}>7 days before (1 week)</option><option value={14}>14 days before (2 weeks)</option></select><p className="text-sm text-[#4A4A4D] mt-1">Confirmed attendees get an automatic reminder this many days ahead of the event.</p></div>
               <div><label className="font-semibold">Image URL</label><input className={input} value={edit.image} onChange={(e) => setEdit({ ...edit, image: e.target.value })} /></div>
               <div className="sm:col-span-2"><label className="font-semibold">Description</label><textarea rows={3} className={input} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></div>
               <div className="sm:col-span-2"><label className="font-semibold">Private online link (not shown publicly)</label><input className={input} value={edit.online_link} onChange={(e) => setEdit({ ...edit, online_link: e.target.value })} /></div>
