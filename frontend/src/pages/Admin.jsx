@@ -29,6 +29,25 @@ const ADMIN_SECTIONS = [
   ["redirects", "Redirects & SEO", Link2],
 ];
 
+// Which roles may access each section (super_admin is always allowed; [] = super_admin only).
+// Mirrors the backend require_admin() matrix.
+const SECTION_ROLES = {
+  dashboard: ["finance_admin", "shop_admin", "readonly"],
+  products: ["shop_admin", "product_approver", "product_contributor"],
+  orders: ["shop_admin", "finance_admin"],
+  vat: ["finance_admin", "content_admin"],
+  equipment: ["shop_admin", "support_admin"],
+  events: ["events_admin"],
+  guided: ["shop_admin", "product_contributor", "product_approver"],
+  postage: ["shop_admin", "finance_admin"],
+  enquiries: ["support_admin", "shop_admin", "finance_admin"],
+  donations: ["finance_admin"],
+  users: [],
+  xero: ["finance_admin"],
+  emails: ["content_admin"],
+  redirects: ["content_admin"],
+};
+
 const ROLES = ["customer", "super_admin", "shop_admin", "finance_admin", "content_admin", "events_admin", "support_admin", "readonly", "product_contributor", "product_approver"];
 
 export default function Admin() {
@@ -37,7 +56,16 @@ export default function Admin() {
   const [section, setSection] = useState("dashboard");
   const [adminOpen, setAdminOpen] = useState(false);
   const adminKeys = ADMIN_SECTIONS.map((s) => s[0]);
+  const canAccess = (k) => user?.role === "super_admin" || (SECTION_ROLES[k] || []).includes(user?.role);
+  const mainVisible = SECTIONS.filter((s) => canAccess(s[0]));
+  const adminVisible = ADMIN_SECTIONS.filter((s) => canAccess(s[0]));
   useEffect(() => { if (adminKeys.includes(section)) setAdminOpen(true); }, [section]); // eslint-disable-line
+  useEffect(() => {
+    if (user && user.role !== "customer" && !canAccess(section)) {
+      const first = mainVisible[0] || adminVisible[0];
+      if (first) setSection(first[0]);
+    }
+  }, [user]); // eslint-disable-line
 
   useEffect(() => {
     if (user === false) nav("/login");
@@ -51,23 +79,27 @@ export default function Admin() {
       <aside className="w-64 bg-brand-green text-white flex flex-col shrink-0 min-h-screen sticky top-0" data-testid="admin-sidebar">
         <div className="p-5 font-heading font-extrabold text-2xl border-b border-white/15">Grace Cares</div>
         <nav className="flex-1 p-3 space-y-1 overflow-auto">
-          {SECTIONS.map(([k, label, I]) => (
+          {mainVisible.map(([k, label, I]) => (
             <button key={k} onClick={() => setSection(k)} className={`w-full flex items-center gap-3 rounded-lg px-4 py-3 text-left font-semibold min-h-[44px] ${section === k ? "bg-white/20" : "hover:bg-white/10"}`} data-testid={`admin-nav-${k}`}>
               <I size={20} /> {label}
             </button>
           ))}
-          <button onClick={() => setAdminOpen((o) => !o)} className={`w-full flex items-center gap-3 rounded-lg px-4 py-3 text-left font-semibold min-h-[44px] ${adminKeys.includes(section) ? "bg-white/10" : "hover:bg-white/10"}`} data-testid="admin-nav-group">
-            <Settings size={20} /> Admin
-            <ChevronDown size={18} className={`ml-auto transition-transform ${adminOpen ? "rotate-180" : ""}`} />
-          </button>
-          {adminOpen && (
-            <div className="ml-3 pl-2 border-l border-white/15 space-y-1" data-testid="admin-nav-group-items">
-              {ADMIN_SECTIONS.map(([k, label, I]) => (
-                <button key={k} onClick={() => setSection(k)} className={`w-full flex items-center gap-3 rounded-lg px-4 py-2.5 text-left font-semibold min-h-[40px] text-sm ${section === k ? "bg-white/20" : "hover:bg-white/10"}`} data-testid={`admin-nav-${k}`}>
-                  <I size={18} /> {label}
-                </button>
-              ))}
-            </div>
+          {adminVisible.length > 0 && (
+            <>
+              <button onClick={() => setAdminOpen((o) => !o)} className={`w-full flex items-center gap-3 rounded-lg px-4 py-3 text-left font-semibold min-h-[44px] ${adminKeys.includes(section) ? "bg-white/10" : "hover:bg-white/10"}`} data-testid="admin-nav-group">
+                <Settings size={20} /> Admin
+                <ChevronDown size={18} className={`ml-auto transition-transform ${adminOpen ? "rotate-180" : ""}`} />
+              </button>
+              {adminOpen && (
+                <div className="ml-3 pl-2 border-l border-white/15 space-y-1" data-testid="admin-nav-group-items">
+                  {adminVisible.map(([k, label, I]) => (
+                    <button key={k} onClick={() => setSection(k)} className={`w-full flex items-center gap-3 rounded-lg px-4 py-2.5 text-left font-semibold min-h-[40px] text-sm ${section === k ? "bg-white/20" : "hover:bg-white/10"}`} data-testid={`admin-nav-${k}`}>
+                      <I size={18} /> {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </nav>
         <div className="p-3 border-t border-white/15">
@@ -76,6 +108,12 @@ export default function Admin() {
         </div>
       </aside>
       <main className="flex-1 p-8 overflow-auto">
+        {!canAccess(section) ? (
+          <div className="text-center py-20" data-testid="admin-no-access">
+            <h2 className="font-heading text-2xl font-bold text-brand-green mb-2">No access</h2>
+            <p className="text-[#4A4A4D]">Your role ({user.role}) doesn't have access to this area. Contact a super admin if you need it.</p>
+          </div>
+        ) : (<>
         {section === "dashboard" && <Dashboard onNavigate={setSection} />}
         {section === "products" && <Products />}
         {section === "orders" && <Orders />}
@@ -90,6 +128,7 @@ export default function Admin() {
         {section === "postage" && <Postage />}
         {section === "redirects" && <Redirects />}
         {section === "users" && <UsersAdmin />}
+        </>)}
       </main>
     </div>
   );

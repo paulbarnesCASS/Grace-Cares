@@ -136,6 +136,9 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 ## v3 round 19 (this session — 2026-06)
 - **Collapsible "Admin" sidebar group**: moved Users & Roles, Xero Sync, Email Templates, and Redirects & SEO out of the flat nav into a new collapsible "Admin" group (gear icon + chevron) at the bottom of the sidebar. It auto-expands when one of its items is the active section. Main operational sections (Dashboard, Products, Orders, VAT, Equipment, Events, Guided Listing, Postage, Enquiries, Financial Donations) remain top-level.
 
+## v3 round 20 (this session — 2026-06)
+- **Role-gated admin navigation**: the sidebar now honours the Users & Roles matrix. A `SECTION_ROLES` map mirrors the backend `require_admin()` roles for every section; `canAccess()` filters both the main nav and the collapsible Admin group (super_admin always sees all). The Admin group is hidden entirely when a role can't access any of its items; the active section falls back to the first the user can access, and the content area shows a "No access" message if an out-of-scope section is reached. Verified: a finance_admin sees only Dashboard/Orders/VAT/Postage/Enquiries/Donations + an Admin group with just Xero Sync; Users/Email Templates/Redirects and Products/Equipment/Events/Guided are hidden.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.
