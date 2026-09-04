@@ -17,7 +17,7 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
 from core import db, now_utc
 from auth import require_admin
 from shop import get_vat_statement, STANDARD_VAT
-from emails import send_email
+from emails import send_email, render_and_send
 
 logger = logging.getLogger("grace_cares")
 receipts_router = APIRouter(prefix="/api")
@@ -183,33 +183,19 @@ async def email_receipt(did: str, user=Depends(require_admin("finance_admin"))):
 
     _, relieved = _relief_lines(order)
     ref = escape(dec.get("order_reference", ""))
-    name = escape(dec.get("eligible_person_name") or "there")
-    html = (
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="font-family:Arial,Helvetica,sans-serif;color:#1A1A1D"><tr><td style="padding:24px">'
-        f'<h1 style="color:{BRAND};font-size:22px;margin:0 0 4px">Grace Cares</h1>'
-        '<p style="font-size:13px;color:#4A4A4D;margin:0 0 16px">Your VAT relief declaration receipt</p>'
-        f'<p style="font-size:15px">Hello {name},</p>'
-        f'<p style="font-size:15px;line-height:22px">Thank you for your order <strong>{ref}</strong>. '
-        'Attached to this email as a secure link is your VAT relief declaration receipt, which you can '
-        'download, print and keep for your records.</p>'
+    receipt_box = (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'style="background:#F3F7F4;border-radius:10px;margin:14px 0"><tr><td style="padding:16px 18px">'
         f'<p style="margin:0 0 6px;font-size:14px"><strong>Order:</strong> {ref}</p>'
         f'<p style="margin:0 0 6px;font-size:14px"><strong>Total VAT relieved on eligible items:</strong> {_gbp(relieved)}</p>'
-        '</td></tr></table>'
-        f'<p style="margin:20px 0"><a href="{link}" '
-        f'style="background:{BRAND};color:#ffffff;text-decoration:none;padding:12px 22px;'
-        'border-radius:999px;font-weight:bold;font-size:15px;display:inline-block">Download your receipt (PDF)</a></p>'
-        '<p style="font-size:13px;color:#4A4A4D;line-height:20px">If the button does not work, copy and paste this '
-        'link into your browser:<br>'+escape(link)+'</p>'
-        '<p style="font-size:12px;color:#888;margin-top:22px;line-height:18px">Sent by Grace Cares CIC, Lichfield. '
-        'We never ask for your password or card details by email. If you have questions, call 01543 730189 or '
-        'email hello@grace-cares.com.</p>'
-        '</td></tr></table>'
-    )
-    subject = f"Your Grace Cares VAT relief receipt — order {dec.get('order_reference','')}"
-    email_id = await send_email(to=to, subject=subject, html=html)
+        '</td></tr></table>')
+    download_button = (f'<p style="margin:20px 0"><a href="{link}" '
+                       f'style="background:{BRAND};color:#ffffff;text-decoration:none;padding:12px 22px;'
+                       'border-radius:999px;font-weight:bold;font-size:15px;display:inline-block">Download your receipt (PDF)</a></p>')
+    ctx = {"name": escape(dec.get("eligible_person_name") or "there"), "reference": ref,
+           "relieved": _gbp(relieved), "receipt_box": receipt_box,
+           "download_button": download_button, "download_url": escape(link)}
+    email_id = await render_and_send("vat_receipt", to, ctx)
     await db.vat_declarations.update_one({"_id": ObjectId(did)},
         {"$set": {"receipt_emailed_at": now_utc(), "receipt_email_to": to}})
     return {"ok": True, "sent_to": to, "email_id": email_id}

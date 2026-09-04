@@ -9,6 +9,7 @@ from bson import ObjectId
 from core import db, now_utc, clean, cleans
 from auth import get_current_user, get_optional_user, require_admin
 from shop import gen_ref, log_audit, upsert_subscriber
+from emails import send_donation_thank_you
 
 content_router = APIRouter(prefix="/api")
 
@@ -71,6 +72,24 @@ async def _finalize_donation(donation_id, pi):
     await db.xero_sync_queue.insert_one({
         "donation_id": donation_id, "order_ref": d["reference"], "type": "donation",
         "amount": d["amount"], "status": "queued", "attempts": 0, "created_at": now_utc()})
+    try:
+        fresh = await db.donations.find_one({"_id": ObjectId(donation_id)})
+        await send_donation_thank_you(fresh)
+        await db.donations.update_one({"_id": ObjectId(donation_id)}, {"$set": {"thank_you_emailed_at": now_utc()}})
+    except Exception as e:
+        print(f"[EMAIL] donation thank-you failed for {d.get('reference')}: {e}")
+
+
+@content_router.post("/admin/donations/{did}/thank-you")
+async def resend_donation_thank_you(did: str, user=Depends(require_admin("finance_admin"))):
+    d = await db.donations.find_one({"_id": ObjectId(did)})
+    if not d:
+        raise HTTPException(404, "Donation not found")
+    email_id = await send_donation_thank_you(d)
+    if not email_id:
+        raise HTTPException(400, "No donor email is stored on this donation")
+    await db.donations.update_one({"_id": ObjectId(did)}, {"$set": {"thank_you_emailed_at": now_utc()}})
+    return {"ok": True, "email_id": email_id, "sent_to": d.get("email")}
 
 
 @content_router.get("/admin/donations")

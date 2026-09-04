@@ -9,6 +9,7 @@ from bson import ObjectId
 
 from core import db, now_utc, clean, cleans
 from auth import get_current_user, require_admin, ADMIN_ROLES, hash_password
+from emails import TEMPLATE_DEFAULTS, get_template, _apply, _shell, _assert_safe_email
 
 admin_router = APIRouter(prefix="/api")
 
@@ -80,6 +81,55 @@ async def _summary_metrics(date_from, date_to):
 COMPARE_KEYS = ["total_sales_inc_vat", "total_sales_ex_vat", "total_vat", "zero_rated_sales",
                 "donations_total", "refunds_total", "average_order_value", "orders_count",
                 "equipment_saved", "event_bookings", "resource_downloads", "email_signups"]
+
+
+# ---------------- Editable email templates ----------------
+class EmailTemplateBody(BaseModel):
+    subject: str
+    body: str
+
+
+@admin_router.get("/admin/email-templates")
+async def list_email_templates(user=Depends(require_admin("content_admin", "super_admin"))):
+    overrides = {d["key"]: d for d in await db.email_templates.find().to_list(50)}
+    out = []
+    for key, base in TEMPLATE_DEFAULTS.items():
+        o = overrides.get(key)
+        out.append({"key": key, "label": base["label"], "description": base["description"],
+                    "variables": base["variables"],
+                    "subject": (o or {}).get("subject") or base["subject"],
+                    "body": (o or {}).get("body") or base["body"],
+                    "default_subject": base["subject"], "default_body": base["body"],
+                    "customised": bool(o)})
+    return out
+
+
+@admin_router.put("/admin/email-templates/{key}")
+async def save_email_template(key: str, body: EmailTemplateBody, user=Depends(require_admin("content_admin", "super_admin"))):
+    if key not in TEMPLATE_DEFAULTS:
+        raise HTTPException(404, "Unknown template")
+    ctx = TEMPLATE_DEFAULTS[key]["sample"]
+    try:
+        _assert_safe_email(_apply(body.subject, ctx), _shell(_apply(body.body, ctx)))
+    except ValueError as e:
+        raise HTTPException(400, f"Template failed email safety checks: {e}")
+    await db.email_templates.update_one({"key": key},
+        {"$set": {"key": key, "subject": body.subject, "body": body.body, "updated_at": now_utc(), "updated_by": user["email"]}}, upsert=True)
+    return {"ok": True}
+
+
+@admin_router.post("/admin/email-templates/{key}/reset")
+async def reset_email_template(key: str, user=Depends(require_admin("content_admin", "super_admin"))):
+    await db.email_templates.delete_one({"key": key})
+    return {"ok": True, **TEMPLATE_DEFAULTS.get(key, {})}
+
+
+@admin_router.post("/admin/email-templates/{key}/preview")
+async def preview_email_template(key: str, body: EmailTemplateBody, user=Depends(require_admin("content_admin", "super_admin"))):
+    if key not in TEMPLATE_DEFAULTS:
+        raise HTTPException(404, "Unknown template")
+    ctx = TEMPLATE_DEFAULTS[key]["sample"]
+    return {"subject": _apply(body.subject, ctx), "html": _shell(_apply(body.body, ctx))}
 
 
 async def _donations_in_range(date_from, date_to):

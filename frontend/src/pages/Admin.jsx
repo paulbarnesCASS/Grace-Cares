@@ -21,6 +21,7 @@ const SECTIONS = [
   ["xero", "Xero Sync", RefreshCw],
   ["enquiries", "Enquiries", MessageSquare],
   ["donations", "Financial Donations", HandHeart],
+  ["emails", "Email Templates", Mail],
   ["users", "Users & Roles", Users],
   ["redirects", "Redirects & SEO", Link2],
 ];
@@ -65,6 +66,7 @@ export default function Admin() {
         {section === "xero" && <Xero />}
         {section === "enquiries" && <Enquiries />}
         {section === "donations" && <Donations />}
+        {section === "emails" && <EmailTemplates />}
         {section === "guided" && <GuidedListing />}
         {section === "postage" && <Postage />}
         {section === "redirects" && <Redirects />}
@@ -1058,6 +1060,10 @@ function Donations() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [from, to]);
   const applyPreset = (p) => { setPreset(p); if (p === "all") { setFrom(""); setTo(""); } else if (p !== "custom") { const [f, t] = presetRange(p); setFrom(f); setTo(t); } };
   const reportUrl = (path) => `${base}/admin/${path}${qs() ? `?${qs()}` : ""}`;
+  const sendThankYou = async (d) => {
+    try { const r = await api.post(`/admin/donations/${d.id}/thank-you`); toast.success(`Thank-you emailed to ${r.data.sent_to}`); load(); setSelected((prev) => prev ? { ...prev, thank_you_emailed_at: new Date().toISOString() } : prev); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
   const total = items.reduce((a, d) => a + (d.amount || 0), 0);
   const dt = (v) => v ? new Date(v).toLocaleString("en-GB") : "—";
   return (
@@ -1100,11 +1106,88 @@ function Donations() {
               {[["Donor", selected.name], ["Email", selected.email], ["Amount", gbp(selected.amount)],
                 ["Type", selected.recurring ? "Monthly recurring" : "One-off"], ["Status", selected.payment_status],
                 ["Xero", selected.xero_sync_status], ["Date", dt(selected.created_at)],
+                ["Thank-you sent", selected.thank_you_emailed_at ? dt(selected.thank_you_emailed_at) : "Not yet"],
                 ["Message", selected.message || "—"], ["Dedication", selected.dedication || "—"]].map(([l, v]) => (
                 <div key={l} className="grid grid-cols-[130px_1fr] gap-2 border-b border-brand-border pb-1.5">
                   <span className="font-semibold text-brand-green text-sm">{l}</span><span className="text-sm break-words">{v}</span>
                 </div>
               ))}
+            </div>
+            <div className="flex gap-3 mt-5 flex-wrap">
+              <button onClick={() => sendThankYou(selected)} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="donation-thankyou-btn">{selected.thank_you_emailed_at ? "Resend thank-you" : "Send thank-you"}</button>
+              <button onClick={() => setSelected(null)} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmailTemplates() {
+  const [list, setList] = useState([]);
+  const [sel, setSel] = useState(null);
+  const [subject, setSubject] = useState("");
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [preview, setPreview] = useState(null);
+  const load = () => api.get("/admin/email-templates").then((r) => setList(r.data)).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const open = (t) => { setSel(t); setSubject(t.subject); setBodyHtml(t.body); setPreview(null); };
+  const save = async () => {
+    try { await api.put(`/admin/email-templates/${sel.key}`, { subject, body: bodyHtml }); toast.success("Template saved — now live"); load(); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const reset = async () => {
+    if (!window.confirm("Restore this template to the default wording?")) return;
+    const r = await api.post(`/admin/email-templates/${sel.key}/reset`);
+    setSubject(r.data.subject); setBodyHtml(r.data.body); toast.success("Reset to default"); load();
+  };
+  const doPreview = async () => {
+    try { const r = await api.post(`/admin/email-templates/${sel.key}/preview`, { subject, body: bodyHtml }); setPreview(r.data); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const insertVar = (v) => setBodyHtml((b) => `${b}{{${v}}}`);
+  const inp = "w-full rounded-lg border border-[#8C8C8C] px-3 py-2";
+  return (
+    <div data-testid="admin-emails">
+      <H>Email templates</H>
+      {!sel ? (
+        <div className="grid md:grid-cols-2 gap-4">
+          {list.map((t) => (
+            <button key={t.key} onClick={() => open(t)} className="text-left bg-white rounded-2xl border border-brand-border p-5 hover:border-brand-green hover:shadow-md transition-[border-color,box-shadow]" data-testid={`email-tpl-${t.key}`}>
+              <div className="font-bold text-brand-green flex items-center gap-2"><Mail size={18} /> {t.label} {t.customised && <span className="text-xs bg-brand-lime/40 text-brand-green rounded-full px-2 py-0.5">customised</span>}</div>
+              <p className="text-[#4A4A4D] text-sm mt-1">{t.description}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div>
+          <button onClick={() => setSel(null)} className="text-brand-green font-semibold mb-4" data-testid="email-back">← All templates</button>
+          <h2 className="font-heading text-2xl font-bold text-brand-green mb-1">{sel.label}</h2>
+          <p className="text-[#4A4A4D] text-sm mb-4">{sel.description}</p>
+          <div className="grid lg:grid-cols-2 gap-6">
+            <div>
+              <label className="font-semibold block mb-1">Subject</label>
+              <input className={`${inp} mb-4`} value={subject} onChange={(e) => setSubject(e.target.value)} data-testid="email-subject" />
+              <label className="font-semibold block mb-1">Body (HTML — wrapped in the Grace Cares header/footer automatically)</label>
+              <textarea rows={14} className={`${inp} font-mono text-xs`} value={bodyHtml} onChange={(e) => setBodyHtml(e.target.value)} data-testid="email-body" />
+              <div className="mt-2">
+                <p className="text-sm font-semibold mb-1">Insert a variable:</p>
+                <div className="flex flex-wrap gap-2">
+                  {sel.variables.map((v) => <button key={v} onClick={() => insertVar(v)} className="text-xs bg-brand-bone border border-brand-border rounded-full px-3 py-1 font-mono hover:border-brand-green" data-testid={`email-var-${v}`}>{`{{${v}}}`}</button>)}
+                </div>
+              </div>
+              <div className="flex gap-3 mt-5 flex-wrap">
+                <button onClick={save} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="email-save">Save</button>
+                <button onClick={doPreview} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold" data-testid="email-preview-btn">Preview</button>
+                <button onClick={reset} className="border-2 border-brand-terracotta text-brand-terracotta rounded-full px-6 py-2.5 font-semibold" data-testid="email-reset">Reset to default</button>
+              </div>
+            </div>
+            <div>
+              <label className="font-semibold block mb-1">Preview {preview && <span className="text-[#4A4A4D] font-normal text-sm">— subject: {preview.subject}</span>}</label>
+              <div className="border border-brand-border rounded-xl overflow-hidden bg-white" style={{ height: 520 }}>
+                {preview ? <iframe title="preview" srcDoc={preview.html} className="w-full h-full" data-testid="email-preview" /> : <div className="p-6 text-[#4A4A4D]">Click Preview to see the rendered email with sample data.</div>}
+              </div>
             </div>
           </div>
         </div>

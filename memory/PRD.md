@@ -124,6 +124,10 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Clickable notification banner**: each dashboard notification is a button that marks itself read and navigates to the relevant section (new listing → Products, order/refund → Orders, donation → Donations, booking → Events, enquiry → Enquiries).
 - Tested by testing_agent (frontend) — 100%, no issues (iteration_2.json).
 
+## v3 round 17 (this session — 2026-06)
+- **Editable email templates back-office**: new Admin → Email Templates section. All four transactional emails (order confirmation, order status update, donation thank-you, VAT relief receipt) are editable — subject + inner HTML body with `{{variables}}` (structural fragments like items table, receipt box, buttons are injected as variables so branding/guardrails stay intact). Live Preview renders with sample data; Save/Reset-to-default; each save is validated by the email guardrail gate (rejects forms, credential asks, unsafe links — e.g. a `<form>` body returns 400). Endpoints: `GET /admin/email-templates`, `PUT/POST .../{key}`, `POST .../{key}/preview`, `POST .../{key}/reset`. Overrides stored in `email_templates` collection; `emails.py` refactored to a `TEMPLATE_DEFAULTS` registry + `render_and_send`; `receipts.py` VAT email now uses the `vat_receipt` template.
+- **Donation thank-you email**: sent automatically to donors when a donation payment succeeds (in `_finalize_donation`), resendable from the donation detail modal (`POST /admin/donations/{id}/thank-you`), with a "Thank-you sent" indicator. Note: Resend blocks obviously-fake recipient addresses (seed donors) with a clear "recipient undeliverable" message; real addresses deliver.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.
