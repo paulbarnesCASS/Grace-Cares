@@ -142,6 +142,44 @@ async def test_send_email_template(key: str, body: EmailTemplateBody, user=Depen
     return {"ok": True, "sent_to": user["email"], "email_id": email_id}
 
 
+# ---------------- Editable section permissions (Users & Roles matrix) ----------------
+SECTION_ROLE_DEFAULTS = {
+    "dashboard": ["finance_admin", "shop_admin", "readonly"],
+    "products": ["shop_admin", "product_approver", "product_contributor"],
+    "orders": ["shop_admin", "finance_admin"],
+    "vat": ["finance_admin", "content_admin"],
+    "equipment": ["shop_admin", "support_admin"],
+    "events": ["events_admin"],
+    "guided": ["shop_admin", "product_contributor", "product_approver"],
+    "postage": ["shop_admin", "finance_admin"],
+    "enquiries": ["support_admin", "shop_admin", "finance_admin"],
+    "donations": ["finance_admin"],
+    "users": [],
+    "xero": ["finance_admin"],
+    "emails": ["content_admin"],
+    "redirects": ["content_admin"],
+}
+
+
+@admin_router.get("/admin/section-permissions")
+async def get_section_permissions(user=Depends(require_admin(*ADMIN_ROLES))):
+    s = await db.site_settings.find_one({"key": "section_permissions"})
+    stored = (s or {}).get("permissions") or {}
+    return {k: stored.get(k, v) for k, v in SECTION_ROLE_DEFAULTS.items()}
+
+
+class SectionPermsBody(BaseModel):
+    permissions: dict
+
+
+@admin_router.put("/admin/section-permissions")
+async def set_section_permissions(body: SectionPermsBody, user=Depends(require_admin("super_admin"))):
+    perms = {k: list(body.permissions.get(k, v)) for k, v in SECTION_ROLE_DEFAULTS.items()}
+    await db.site_settings.update_one({"key": "section_permissions"},
+        {"$set": {"key": "section_permissions", "permissions": perms}}, upsert=True)
+    return {"ok": True, "permissions": perms}
+
+
 async def _donations_in_range(date_from, date_to):
     from datetime import datetime as _dt, timezone as _tz
     q = {}

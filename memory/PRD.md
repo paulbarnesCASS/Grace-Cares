@@ -139,6 +139,10 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 ## v3 round 20 (this session — 2026-06)
 - **Role-gated admin navigation**: the sidebar now honours the Users & Roles matrix. A `SECTION_ROLES` map mirrors the backend `require_admin()` roles for every section; `canAccess()` filters both the main nav and the collapsible Admin group (super_admin always sees all). The Admin group is hidden entirely when a role can't access any of its items; the active section falls back to the first the user can access, and the content area shows a "No access" message if an out-of-scope section is reached. Verified: a finance_admin sees only Dashboard/Orders/VAT/Postage/Enquiries/Donations + an Admin group with just Xero Sync; Users/Email Templates/Redirects and Products/Equipment/Events/Guided are hidden.
 
+## v3 round 21 (this session — 2026-06)
+- **Editable section permissions**: a super admin can now set which roles see which sections from Users & Roles (a "Section access by role" checkbox matrix). Stored in `site_settings.section_permissions`; the sidebar `canAccess()` loads it live (`GET/PUT /admin/section-permissions`, PUT is super_admin-only), falling back to code defaults. Users & Roles stays super-admin-only. Verified: GET returns 14 sections, PUT saves/reset, matrix renders.
+- **Event booking reminders**: new editable `booking_reminder` email template; a daily cron (`/api/cron/booking-reminders`, 9am UTC in `.emergent/crons.yml`, bearer-secret auth, background task) emails everyone with a confirmed booking for an event starting the next day, marking `reminder_sent` to avoid duplicates. Verified: cron 200 with auth / 401 without; template present (7 total).
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

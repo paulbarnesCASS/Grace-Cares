@@ -55,10 +55,12 @@ export default function Admin() {
   const nav = useNavigate();
   const [section, setSection] = useState("dashboard");
   const [adminOpen, setAdminOpen] = useState(false);
+  const [perms, setPerms] = useState(SECTION_ROLES);
   const adminKeys = ADMIN_SECTIONS.map((s) => s[0]);
-  const canAccess = (k) => user?.role === "super_admin" || (SECTION_ROLES[k] || []).includes(user?.role);
+  const canAccess = (k) => user?.role === "super_admin" || (perms[k] || SECTION_ROLES[k] || []).includes(user?.role);
   const mainVisible = SECTIONS.filter((s) => canAccess(s[0]));
   const adminVisible = ADMIN_SECTIONS.filter((s) => canAccess(s[0]));
+  useEffect(() => { api.get("/admin/section-permissions").then((r) => setPerms(r.data)).catch(() => {}); }, []);
   useEffect(() => { if (adminKeys.includes(section)) setAdminOpen(true); }, [section]); // eslint-disable-line
   useEffect(() => {
     if (user && user.role !== "customer" && !canAccess(section)) {
@@ -1298,6 +1300,20 @@ function UsersAdmin() {
   const load = () => api.get("/admin/users").then((r) => setUsers(r.data));
   useEffect(() => { load(); }, []);
   const setRole = async (id, role) => { await api.put(`/admin/users/${id}/role`, { role }); toast.success("Role updated"); load(); };
+  const { user } = useAuth();
+  const [perms, setPerms] = useState(null);
+  const ALL_SECTIONS = [...SECTIONS, ...ADMIN_SECTIONS];
+  const EDIT_ROLES = ["shop_admin", "finance_admin", "content_admin", "events_admin", "support_admin", "product_contributor", "product_approver", "readonly"];
+  useEffect(() => { if (user?.role === "super_admin") api.get("/admin/section-permissions").then((r) => setPerms(r.data)).catch(() => {}); }, [user]);
+  const toggle = (sec, role) => setPerms((p) => {
+    const cur = new Set(p[sec] || []);
+    cur.has(role) ? cur.delete(role) : cur.add(role);
+    return { ...p, [sec]: [...cur] };
+  });
+  const savePerms = async () => {
+    try { await api.put("/admin/section-permissions", { permissions: perms }); toast.success("Permissions saved — reload to apply to your own menu"); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
   return (
     <div data-testid="admin-users">
       <H>Users & roles</H>
@@ -1306,6 +1322,28 @@ function UsersAdmin() {
           <tr key={u.id} className={i % 2 ? "bg-brand-bone" : ""}><td className="p-3">{u.name}</td><td className="p-3">{u.email}</td>
             <td className="p-3"><select value={u.role} onChange={(e) => setRole(u.id, e.target.value)} className="rounded-lg border border-[#8C8C8C] px-3 py-2 bg-white" data-testid={`role-${u.email}`}>{ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</select></td></tr>
         ))}</tbody></table></Card>
+
+      {perms && (
+        <Card className="mt-6 overflow-x-auto" data-testid="perms-matrix">
+          <h3 className="font-bold text-brand-green mb-1">Section access by role</h3>
+          <p className="text-[#4A4A4D] text-sm mb-3">Tick which roles can see each section. Super admins always see everything.</p>
+          <table className="text-left text-sm">
+            <thead><tr><th className="p-2 sticky left-0 bg-white">Section</th>{EDIT_ROLES.map((r) => <th key={r} className="p-2 text-xs whitespace-nowrap rotate-0">{r}</th>)}</tr></thead>
+            <tbody>{ALL_SECTIONS.map(([k, label]) => (
+              <tr key={k} className="border-t border-brand-border">
+                <td className="p-2 font-semibold sticky left-0 bg-white">{label}</td>
+                {EDIT_ROLES.map((r) => (
+                  <td key={r} className="p-2 text-center">
+                    {k === "users" ? <span className="text-[#B0B0B0]" title="Super admin only">—</span>
+                      : <input type="checkbox" className="h-4 w-4" checked={(perms[k] || []).includes(r)} onChange={() => toggle(k, r)} data-testid={`perm-${k}-${r}`} />}
+                  </td>
+                ))}
+              </tr>
+            ))}</tbody>
+          </table>
+          <button onClick={savePerms} className="mt-4 bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="perms-save">Save permissions</button>
+        </Card>
+      )}
     </div>
   );
 }

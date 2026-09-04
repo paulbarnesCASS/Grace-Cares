@@ -9,7 +9,9 @@ from bson import ObjectId
 from core import db, now_utc, clean, cleans
 from auth import get_current_user, get_optional_user, require_admin
 from shop import gen_ref, log_audit, upsert_subscriber
-from emails import send_donation_thank_you, send_booking_confirmation, send_enquiry_ack
+from emails import send_donation_thank_you, send_booking_confirmation, send_enquiry_ack, send_booking_reminder
+from fastapi import BackgroundTasks, Header
+import hmac
 
 content_router = APIRouter(prefix="/api")
 
@@ -247,6 +249,40 @@ async def update_event(eid: str, body: EventBody, user=Depends(require_admin("ev
 async def delete_event(eid: str, user=Depends(require_admin("events_admin"))):
     await db.events.delete_one({"_id": ObjectId(eid)})
     return {"ok": True}
+
+
+async def _send_booking_reminders():
+    from datetime import datetime, timezone, timedelta
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    sent = 0
+    for e in await db.events.find({"cancelled": {"$ne": True}}).to_list(1000):
+        try:
+            d = datetime.fromisoformat(str(e.get("start_at", "")).replace("Z", "+00:00"))
+        except Exception:
+            continue
+        if d.date() != tomorrow:
+            continue
+        bookings = await db.event_bookings.find({"event_id": str(e["_id"]), "status": "confirmed",
+                                                 "reminder_sent": {"$ne": True}}).to_list(2000)
+        for b in bookings:
+            try:
+                await send_booking_reminder(b, e)
+                await db.event_bookings.update_one({"_id": b["_id"]}, {"$set": {"reminder_sent": now_utc()}})
+                sent += 1
+            except Exception as ex:
+                print(f"[CRON] booking reminder failed: {ex}")
+    print(f"[CRON] booking reminders sent: {sent}")
+
+
+@content_router.post("/cron/booking-reminders")
+async def cron_booking_reminders(background: BackgroundTasks, authorization: str = Header(default="")):
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    token = authorization[7:] if authorization.startswith("Bearer ") else ""
+    if not secret or not hmac.compare_digest(token, secret):
+        raise HTTPException(401, "Unauthorized")
+    background.add_task(_send_booking_reminders)
+    return {"ok": True, "queued": True}
 
 
 class BookingBody(BaseModel):

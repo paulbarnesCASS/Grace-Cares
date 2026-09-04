@@ -269,6 +269,21 @@ TEMPLATE_DEFAULTS = {
         ),
         "sample": {"name": "Jane Smith", "reference": "EN-12345678", "enquiry_type": "equipment"},
     },
+    "booking_reminder": {
+        "label": "Event reminder (day before)",
+        "description": "Sent automatically the day before an event to everyone with a confirmed booking.",
+        "variables": ["name", "reference", "event_name", "when", "venue_note"],
+        "subject": "Reminder: {{event_name}} is tomorrow",
+        "body": (
+            '<p style="font-size:13px;color:#4A4A4D;margin:0 0 16px">A quick reminder</p>'
+            f'<p style="{_P}">Hello {{{{name}}}}, this is a friendly reminder that <strong>{{{{event_name}}}}</strong> '
+            'is tomorrow. We look forward to seeing you.</p>'
+            f'<p style="{_P}">When: {{{{when}}}}</p>{{{{venue_note}}}}'
+            f'<p style="{_P}">Booking reference: <strong>{{{{reference}}}}</strong></p>'
+        ),
+        "sample": {"name": "Jane Smith", "reference": "EB-12345678", "event_name": "Manual Handling Workshop",
+                   "when": "2026-09-10 10:00", "venue_note": ""},
+    },
 }
 
 
@@ -372,4 +387,17 @@ async def send_enquiry_ack(enquiry: dict) -> str | None:
     ctx = {"name": escape(enquiry.get("name") or "there"), "reference": escape(enquiry.get("reference", "")),
            "enquiry_type": escape((enquiry.get("enquiry_type") or "your enquiry").replace("_", " "))}
     return await render_and_send("enquiry_auto_reply", to, ctx)
+
+
+async def send_booking_reminder(booking: dict, event: dict = None) -> str | None:
+    to = (booking or {}).get("email", "").strip()
+    if not to:
+        return None
+    ev = event or {}
+    when = escape(str(ev.get("start_at", "")).replace("T", " ")[:16])
+    venue = ev.get("venue") or ev.get("online_link")
+    ctx = {"name": escape(booking.get("name") or "there"), "reference": escape(booking.get("reference", "")),
+           "event_name": escape(booking.get("event_name") or ev.get("name") or "your event"),
+           "when": when, "venue_note": (f'<p style="{_P}">Where: {escape(str(venue))}</p>' if venue else "")}
+    return await render_and_send("booking_reminder", to, ctx)
 
