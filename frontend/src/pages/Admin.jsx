@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { api, gbp, formatApiErrorDetail } from "@/lib/api";
@@ -1124,12 +1124,46 @@ function Donations() {
   );
 }
 
+const RichTextEditor = React.forwardRef(({ value, onChange }, ref) => {
+  const el = useRef(null);
+  const [raw, setRaw] = useState(false);
+  useEffect(() => { if (el.current && !raw) el.current.innerHTML = value || ""; /* init once */ }, []); // eslint-disable-line
+  const sync = () => onChange(el.current.innerHTML);
+  const cmd = (c, v) => { el.current.focus(); document.execCommand(c, false, v); sync(); };
+  const addLink = () => { const u = window.prompt("Link URL (https://…)"); if (u) cmd("createLink", u); };
+  React.useImperativeHandle(ref, () => ({
+    insertToken: (t) => {
+      if (raw) { onChange((value || "") + t); return; }
+      el.current.focus(); document.execCommand("insertText", false, t); sync();
+    },
+  }));
+  const Btn = ({ c, v, label, td }) => <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd(c, v)} className="px-2 py-1 rounded border border-brand-border text-sm hover:border-brand-green font-semibold" data-testid={td}>{label}</button>;
+  return (
+    <div className="border border-brand-border rounded-lg overflow-hidden">
+      <div className="flex flex-wrap gap-1 p-2 bg-brand-bone border-b border-brand-border">
+        <Btn c="bold" label="B" td="rte-bold" />
+        <Btn c="italic" label="I" td="rte-italic" />
+        <Btn c="underline" label="U" td="rte-underline" />
+        <Btn c="formatBlock" v="<h2>" label="H2" td="rte-h2" />
+        <Btn c="formatBlock" v="<p>" label="¶" td="rte-p" />
+        <Btn c="insertUnorderedList" label="• List" td="rte-ul" />
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={addLink} className="px-2 py-1 rounded border border-brand-border text-sm hover:border-brand-green font-semibold" data-testid="rte-link">Link</button>
+        <button type="button" onClick={() => setRaw((r) => !r)} className={`px-2 py-1 rounded border text-sm font-semibold ml-auto ${raw ? "border-brand-green bg-brand-green text-white" : "border-brand-border"}`} data-testid="rte-toggle-html">{"</> HTML"}</button>
+      </div>
+      {raw
+        ? <textarea rows={14} className="w-full px-3 py-2 font-mono text-xs" value={value} onChange={(e) => onChange(e.target.value)} data-testid="rte-raw" />
+        : <div ref={el} contentEditable suppressContentEditableWarning onInput={sync} className="min-h-[300px] px-3 py-2 text-sm focus:outline-none" data-testid="rte-editable" />}
+    </div>
+  );
+});
+
 function EmailTemplates() {
   const [list, setList] = useState([]);
   const [sel, setSel] = useState(null);
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");
   const [preview, setPreview] = useState(null);
+  const editorRef = useRef(null);
   const load = () => api.get("/admin/email-templates").then((r) => setList(r.data)).catch(() => {});
   useEffect(() => { load(); }, []);
   const open = (t) => { setSel(t); setSubject(t.subject); setBodyHtml(t.body); setPreview(null); };
@@ -1146,7 +1180,11 @@ function EmailTemplates() {
     try { const r = await api.post(`/admin/email-templates/${sel.key}/preview`, { subject, body: bodyHtml }); setPreview(r.data); }
     catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
-  const insertVar = (v) => setBodyHtml((b) => `${b}{{${v}}}`);
+  const insertVar = (v) => editorRef.current?.insertToken(`{{${v}}}`);
+  const testSend = async () => {
+    try { const r = await api.post(`/admin/email-templates/${sel.key}/test-send`, { subject, body: bodyHtml }); toast.success(`Test email sent to ${r.data.sent_to}`); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
   const inp = "w-full rounded-lg border border-[#8C8C8C] px-3 py-2";
   return (
     <div data-testid="admin-emails">
@@ -1169,8 +1207,8 @@ function EmailTemplates() {
             <div>
               <label className="font-semibold block mb-1">Subject</label>
               <input className={`${inp} mb-4`} value={subject} onChange={(e) => setSubject(e.target.value)} data-testid="email-subject" />
-              <label className="font-semibold block mb-1">Body (HTML — wrapped in the Grace Cares header/footer automatically)</label>
-              <textarea rows={14} className={`${inp} font-mono text-xs`} value={bodyHtml} onChange={(e) => setBodyHtml(e.target.value)} data-testid="email-body" />
+              <label className="font-semibold block mb-1">Body — format with the toolbar; wrapped in the Grace Cares header/footer automatically</label>
+              <RichTextEditor key={sel.key} ref={editorRef} value={bodyHtml} onChange={setBodyHtml} />
               <div className="mt-2">
                 <p className="text-sm font-semibold mb-1">Insert a variable:</p>
                 <div className="flex flex-wrap gap-2">
@@ -1180,6 +1218,7 @@ function EmailTemplates() {
               <div className="flex gap-3 mt-5 flex-wrap">
                 <button onClick={save} className="bg-brand-green text-white rounded-full px-6 py-2.5 font-semibold" data-testid="email-save">Save</button>
                 <button onClick={doPreview} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold" data-testid="email-preview-btn">Preview</button>
+                <button onClick={testSend} className="border-2 border-brand-green text-brand-green rounded-full px-6 py-2.5 font-semibold" data-testid="email-testsend">Send test to me</button>
                 <button onClick={reset} className="border-2 border-brand-terracotta text-brand-terracotta rounded-full px-6 py-2.5 font-semibold" data-testid="email-reset">Reset to default</button>
               </div>
             </div>

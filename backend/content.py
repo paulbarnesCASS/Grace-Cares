@@ -9,7 +9,7 @@ from bson import ObjectId
 from core import db, now_utc, clean, cleans
 from auth import get_current_user, get_optional_user, require_admin
 from shop import gen_ref, log_audit, upsert_subscriber
-from emails import send_donation_thank_you
+from emails import send_donation_thank_you, send_booking_confirmation, send_enquiry_ack
 
 content_router = APIRouter(prefix="/api")
 
@@ -309,6 +309,10 @@ async def create_booking(body: BookingBody):
            "status": "confirmed", "payment_status": "free", "checked_in": False,
            "created_at": now_utc()}
     await db.event_bookings.insert_one(doc)
+    try:
+        await send_booking_confirmation(doc, e)
+    except Exception as ex:
+        print(f"[EMAIL] booking confirmation failed for {ref}: {ex}")
     return {"ok": True, "confirmed": True, "reference": ref,
             "online_link_sent": bool(e.get("online_link"))}
 
@@ -320,6 +324,12 @@ async def _finalize_event_booking(booking_id, pi):
     await db.event_bookings.update_one({"_id": ObjectId(booking_id)},
         {"$set": {"status": "confirmed", "payment_status": "paid",
                   "stripe_payment_intent": pi, "paid_at": now_utc()}})
+    try:
+        fresh = await db.event_bookings.find_one({"_id": ObjectId(booking_id)})
+        ev = await db.events.find_one({"_id": ObjectId(fresh["event_id"])}) if fresh else None
+        await send_booking_confirmation(fresh, ev)
+    except Exception as ex:
+        print(f"[EMAIL] paid booking confirmation failed: {ex}")
 
 
 @content_router.get("/admin/bookings")
@@ -505,6 +515,10 @@ async def submit_enquiry(body: EnquiryBody):
                 "sensitive": body.enquiry_type in SENSITIVE_ENQUIRY_TYPES,
                 "created_at": now_utc()})
     await db.enquiries.insert_one(doc)
+    try:
+        await send_enquiry_ack(doc)
+    except Exception as ex:
+        print(f"[EMAIL] enquiry ack failed for {doc['reference']}: {ex}")
     return {"ok": True, "reference": doc["reference"], "routed_to": routed}
 
 

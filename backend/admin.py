@@ -9,7 +9,7 @@ from bson import ObjectId
 
 from core import db, now_utc, clean, cleans
 from auth import get_current_user, require_admin, ADMIN_ROLES, hash_password
-from emails import TEMPLATE_DEFAULTS, get_template, _apply, _shell, _assert_safe_email
+from emails import TEMPLATE_DEFAULTS, get_template, _apply, _shell, _assert_safe_email, send_email
 
 admin_router = APIRouter(prefix="/api")
 
@@ -130,6 +130,16 @@ async def preview_email_template(key: str, body: EmailTemplateBody, user=Depends
         raise HTTPException(404, "Unknown template")
     ctx = TEMPLATE_DEFAULTS[key]["sample"]
     return {"subject": _apply(body.subject, ctx), "html": _shell(_apply(body.body, ctx))}
+
+
+@admin_router.post("/admin/email-templates/{key}/test-send")
+async def test_send_email_template(key: str, body: EmailTemplateBody, user=Depends(require_admin("content_admin", "super_admin"))):
+    if key not in TEMPLATE_DEFAULTS:
+        raise HTTPException(404, "Unknown template")
+    ctx = TEMPLATE_DEFAULTS[key]["sample"]
+    email_id = await send_email(to=user["email"], subject="[TEST] " + _apply(body.subject, ctx),
+                                html=_shell(_apply(body.body, ctx)))
+    return {"ok": True, "sent_to": user["email"], "email_id": email_id}
 
 
 async def _donations_in_range(date_from, date_to):

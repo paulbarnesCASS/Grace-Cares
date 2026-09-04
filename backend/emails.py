@@ -237,6 +237,38 @@ TEMPLATE_DEFAULTS = {
                    "receipt_box": '<p style="color:#888">[receipt summary]</p>',
                    "download_button": "", "download_url": "https://grace-cares.com/api/..."},
     },
+    "booking_confirmation": {
+        "label": "Event booking confirmation",
+        "description": "Sent to an attendee when their event booking is confirmed (free events immediately, paid events after payment).",
+        "variables": ["name", "reference", "event_name", "attendees", "extra_note"],
+        "subject": "Your booking for {{event_name}} is confirmed ({{reference}})",
+        "body": (
+            '<p style="font-size:13px;color:#4A4A4D;margin:0 0 16px">Your booking is confirmed</p>'
+            f'<p style="{_P}">Hello {{{{name}}}}, thank you — your place is booked and we look forward to seeing you.</p>'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'style="background:#F3F7F4;border-radius:10px;margin:14px 0"><tr><td style="padding:16px 18px">'
+            '<p style="margin:0 0 6px;font-size:14px"><strong>Event:</strong> {{event_name}}</p>'
+            '<p style="margin:0 0 6px;font-size:14px"><strong>Booking reference:</strong> {{reference}}</p>'
+            '<p style="margin:0;font-size:14px"><strong>Places booked:</strong> {{attendees}}</p>'
+            '</td></tr></table>{{extra_note}}'
+        ),
+        "sample": {"name": "Jane Smith", "reference": "EB-12345678", "event_name": "Manual Handling Workshop",
+                   "attendees": 2, "extra_note": ""},
+    },
+    "enquiry_auto_reply": {
+        "label": "Enquiry auto-reply",
+        "description": "A friendly acknowledgement sent automatically when someone submits an enquiry via the website.",
+        "variables": ["name", "reference", "enquiry_type"],
+        "subject": "We've received your enquiry — Grace Cares ({{reference}})",
+        "body": (
+            '<p style="font-size:13px;color:#4A4A4D;margin:0 0 16px">Thanks for getting in touch</p>'
+            f'<p style="{_P}">Hello {{{{name}}}}, thank you for contacting Grace Cares about {{{{enquiry_type}}}}. '
+            'We\'ve received your message (reference <strong>{{reference}}</strong>) and a member of our team '
+            'will be in touch as soon as we can.</p>'
+            f'<p style="{_P}">If your enquiry is urgent, please call us on 01543 730189.</p>'
+        ),
+        "sample": {"name": "Jane Smith", "reference": "EN-12345678", "enquiry_type": "equipment"},
+    },
 }
 
 
@@ -319,4 +351,25 @@ async def send_donation_thank_you(donation: dict) -> str | None:
                           'change or cancel it any time by contacting us.</p>' if recurring else ""),
            "ded_html": (f'<p style="font-size:14px;color:#4A4A4D">Dedication: {escape(dedication)}</p>' if dedication else "")}
     return await render_and_send("donation_thank_you", to, ctx)
+
+
+async def send_booking_confirmation(booking: dict, event: dict = None) -> str | None:
+    to = (booking or {}).get("email", "").strip()
+    if not to:
+        return None
+    online = (event or {}).get("online_link")
+    extra = (f'<p style="{_P}">This is an online event. Join here: {escape(online)}</p>' if online else "")
+    ctx = {"name": escape(booking.get("name") or "there"), "reference": escape(booking.get("reference", "")),
+           "event_name": escape(booking.get("event_name") or "the event"),
+           "attendees": booking.get("num_attendees", 1), "extra_note": extra}
+    return await render_and_send("booking_confirmation", to, ctx)
+
+
+async def send_enquiry_ack(enquiry: dict) -> str | None:
+    to = (enquiry or {}).get("email", "").strip()
+    if not to:
+        return None
+    ctx = {"name": escape(enquiry.get("name") or "there"), "reference": escape(enquiry.get("reference", "")),
+           "enquiry_type": escape((enquiry.get("enquiry_type") or "your enquiry").replace("_", " "))}
+    return await render_and_send("enquiry_auto_reply", to, ctx)
 
