@@ -133,6 +133,9 @@ older people; NHS & care providers; care managers (ESG); volunteers; corporate p
 - **Booking confirmation email**: new editable `booking_confirmation` template; sent automatically when an event booking is confirmed — free events immediately, paid events after payment (`_finalize_event_booking`).
 - **Enquiry auto-reply**: new editable `enquiry_auto_reply` template; a friendly acknowledgement sent automatically when someone submits an enquiry (`POST /enquiries`). Verified: Resend returned 202 Accepted for a deliverable test address.
 
+## v3 round 19 (this session — 2026-06)
+- **Collapsible "Admin" sidebar group**: moved Users & Roles, Xero Sync, Email Templates, and Redirects & SEO out of the flat nav into a new collapsible "Admin" group (gear icon + chevron) at the bottom of the sidebar. It auto-expands when one of its items is the active section. Main operational sections (Dashboard, Products, Orders, VAT, Equipment, Events, Guided Listing, Postage, Enquiries, Financial Donations) remain top-level.
+
 ## Deferred (still open)
 - Confirm VAT declaration wording + product classifications with Grace Cares' VAT adviser.
 - Provide Xero credentials + approved mappings to switch sync from mocked to live.

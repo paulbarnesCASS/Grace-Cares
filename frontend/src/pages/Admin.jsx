@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import {
   LayoutDashboard, Package, ShoppingCart, ShieldCheck, HandHeart, Calendar,
   RefreshCw, Users, MessageSquare, FileText, LogOut, Plus, Leaf, AlertTriangle, Download,
-  Link2, ClipboardList, CheckCircle2, Truck, Bell, Edit3, Mail,
+  Link2, ClipboardList, CheckCircle2, Truck, Bell, Edit3, Mail, Settings, ChevronDown,
 } from "lucide-react";
 
 const SECTIONS = [
@@ -18,11 +18,14 @@ const SECTIONS = [
   ["events", "Events & Bookings", Calendar],
   ["guided", "Guided Listing", ClipboardList],
   ["postage", "Postage & Shipping", Truck],
-  ["xero", "Xero Sync", RefreshCw],
   ["enquiries", "Enquiries", MessageSquare],
   ["donations", "Financial Donations", HandHeart],
-  ["emails", "Email Templates", Mail],
+];
+
+const ADMIN_SECTIONS = [
   ["users", "Users & Roles", Users],
+  ["xero", "Xero Sync", RefreshCw],
+  ["emails", "Email Templates", Mail],
   ["redirects", "Redirects & SEO", Link2],
 ];
 
@@ -32,6 +35,9 @@ export default function Admin() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
   const [section, setSection] = useState("dashboard");
+  const [adminOpen, setAdminOpen] = useState(false);
+  const adminKeys = ADMIN_SECTIONS.map((s) => s[0]);
+  useEffect(() => { if (adminKeys.includes(section)) setAdminOpen(true); }, [section]); // eslint-disable-line
 
   useEffect(() => {
     if (user === false) nav("/login");
@@ -50,6 +56,19 @@ export default function Admin() {
               <I size={20} /> {label}
             </button>
           ))}
+          <button onClick={() => setAdminOpen((o) => !o)} className={`w-full flex items-center gap-3 rounded-lg px-4 py-3 text-left font-semibold min-h-[44px] ${adminKeys.includes(section) ? "bg-white/10" : "hover:bg-white/10"}`} data-testid="admin-nav-group">
+            <Settings size={20} /> Admin
+            <ChevronDown size={18} className={`ml-auto transition-transform ${adminOpen ? "rotate-180" : ""}`} />
+          </button>
+          {adminOpen && (
+            <div className="ml-3 pl-2 border-l border-white/15 space-y-1" data-testid="admin-nav-group-items">
+              {ADMIN_SECTIONS.map(([k, label, I]) => (
+                <button key={k} onClick={() => setSection(k)} className={`w-full flex items-center gap-3 rounded-lg px-4 py-2.5 text-left font-semibold min-h-[40px] text-sm ${section === k ? "bg-white/20" : "hover:bg-white/10"}`} data-testid={`admin-nav-${k}`}>
+                  <I size={18} /> {label}
+                </button>
+              ))}
+            </div>
+          )}
         </nav>
         <div className="p-3 border-t border-white/15">
           <div className="text-sm text-white/70 px-2 mb-2">{user.email}<br />({user.role})</div>
